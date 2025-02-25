@@ -1,0 +1,121 @@
+Based on your background in materials science, nanotechnology, and your strong programming skills in Python, Matlab, and C++, along with your excellent performance in ME 536 – Design of Intelligent Machines, you’re very well positioned to excel in Digital Geometry Processing. Many of the analytical and algorithmic concepts you’ve already encountered (e.g., search algorithms, clustering, matrix decompositions, and image processing) have close parallels in geometry processing. Here’s how you can leverage your experience and a suggested study plan along with some useful resources.
+
+---
+
+## How Your Background Helps
+
+- **Programming & Mathematical Tools:**  
+  Your proficiency in Python, Matlab, and C++ means you can quickly prototype and optimize algorithms such as Dijkstra’s for geodesics or linear solvers for parameterization. Your familiarity with matrix operations and decompositions (from ME 536) is directly applicable to solving the linear systems that arise in mesh parameterization.
+
+- **Algorithmic Thinking:**  
+  Concepts like search algorithms (Dijkstra, A*, genetic algorithms) and clustering methods that you encountered in ME 536 lay a solid foundation for understanding graph-based methods in mesh processing (e.g., shortest path computations, decimation pipelines).
+
+- **Interdisciplinary Perspective:**  
+  Your background in materials science and nanotechnology gives you an appreciation for modeling complex systems. This mindset will help you approach the challenges of discretizing, parameterizing, and simplifying 3D surfaces in Digital Geometry Processing.
+
+---
+
+## Combined Study Plan
+
+### **Weeks 1–2: Foundations & Setup**
+
+- **Review Basic Concepts:**  
+  - **Graph Theory & Search Algorithms:** Revisit Dijkstra’s algorithm and other search methods you encountered in ME 536.
+  - **Linear Algebra Refresh:** Brush up on matrix norms, decompositions, and solving linear systems.
+  
+- **Development Environment:**  
+  - Set up your preferred 3D SDK (e.g., Coin3D/Open Inventor or alternatives like OpenMesh/libigl).  
+  - Follow provided tutorials to get comfortable with visualization tools (this helps in debugging mesh operations).
+
+### **Weeks 3–4: Geodesics on Meshes**
+
+- **Topics to Cover:**  
+  - Discretization of surfaces as graphs.
+  - Detailed study of Dijkstra’s algorithm and its variants.
+  
+- **Tasks:**  
+  - Implement the basic Dijkstra algorithm for computing geodesic distances between mesh vertices.
+  - Experiment with different data structures (arrays, min-heaps, Fibonacci heaps) and compare performance.
+  - Visualize shortest paths (e.g., highlight the computed path on the mesh).
+
+- **Resources:**  
+  - Course lecture slides and online tutorials.
+  - Research paper: “Decimation of Triangle Meshes” (for related graph techniques).
+
+### **Weeks 5–6: Mesh Parameterization**
+
+- **Topics to Cover:**  
+  - Boundary mapping: How to map boundary vertices to a circle.
+  - Interior vertex placement using different weighting schemes:  
+    - **Uniform weights:** Simple averaging.
+    - **Harmonic weights:** Using Laplacian operators.
+    - **Mean-value weights:** For a more natural mapping.
+  
+- **Tasks:**  
+  - Implement the disk parameterization algorithm.
+  - Set up and solve the linear systems for interior vertices.
+  - Compare the visual quality and distortion between the different weighting methods.
+
+- **Resources:**  
+  - Instructor’s lecture slides/videos on mesh parameterization.
+  - “Polygon Mesh Processing” by Botsch et al.
+
+### **Weeks 7–8: Mesh Simplification & Decimation**
+
+- **Topics to Cover:**  
+  - Edge collapse operations and decimation pipelines.
+  - Criteria for edge collapse: Edge length, curvature, and combined measures.
+  - Using Generalized Winding Numbers for the inside/outside tests.
+
+- **Tasks:**  
+  - Develop the edge collapse pipeline with a priority queue.
+  - Implement and test different keys (metrics) for prioritizing edge collapses.
+  - Integrate the “inflation” step to ensure the simplified mesh encloses the original.
+
+- **Resources:**  
+  - Research papers: “Simplification Envelopes” (1996) and “Nested Cages” (2015).
+  - Online tutorials on mesh decimation.
+
+### **Weeks 9–10: Integration & Term Project Preparation**
+
+- **Term Project Ideas:**  
+  - Consider a project that bridges Digital Geometry Processing with intelligent machine design—for instance, mesh segmentation using clustering techniques or shape morphing with energy minimization.
+  
+- **Tasks:**  
+  - Select a project topic and perform a literature review.
+  - Begin integrating your implementations, document your observations, and prepare for a presentation or demo.
+  
+- **Ongoing:**  
+  - Regular coding sessions and peer discussions.
+  - Use version control and thorough documentation (including short explanatory videos) as recommended.
+
+---
+
+## Recommended Sources & Further Reading
+
+- **Books & Textbooks:**  
+  - *Polygon Mesh Processing* by Botsch et al.  
+  - *Digital Geometry Processing* (lecture slides and course notes from your class website).
+
+- **Online Documentation & Tutorials:**  
+  - [Coin3D Documentation](http://www.coin3d.org) and related YouTube tutorials.
+  - [OpenMesh Documentation](http://www.openmesh.org) and [libigl Tutorials](http://libigl.github.io/libigl).
+
+- **Research Papers:**  
+  - “Decimation of Triangle Meshes” (1992)  
+  - “Simplification Envelopes” (1996)  
+  - “Nested Cages” (2015)
+
+- **Additional Topics:**  
+  - If you’re interested in more advanced intersections (e.g., combining machine learning with mesh processing), review materials on mesh segmentation, clustering methods, and energy-based methods for mesh optimization.
+
+---
+
+## Final Thoughts
+
+Your strong interdisciplinary background and prior course experience in ME 536 mean you’re not starting from scratch—you already understand many of the computational and mathematical foundations that Digital Geometry Processing builds upon. Use this to your advantage by:
+
+- Drawing parallels between the algorithms you’ve already seen (search algorithms, clustering, linear algebra) and their applications in mesh processing.
+- Experimenting with your implementations to both deepen your understanding and build a portfolio that might even inspire ideas for your term project.
+
+Good luck, and happy studying!
