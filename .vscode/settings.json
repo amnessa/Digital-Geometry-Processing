@@ -1,12 +1,6 @@
 {
-    "cmake.sourceDirectory": "/home/cago/Digital-Geometry-Processing/projects",
     "files.associations": {
-        "alignedvector3": "cpp",
-        "array": "cpp",
-        "string": "cpp",
-        "string_view": "cpp",
-        "span": "cpp",
-        "iterator": "cpp",
-        "vector": "cpp"
-    }
+        "iostream": "cpp"
+    },
+    "cmake.sourceDirectory": "/home/cago/Digital-Geometry-Processing/hw1"
 }

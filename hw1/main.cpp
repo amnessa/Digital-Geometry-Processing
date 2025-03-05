@@ -1,11 +1,13 @@
-#include <iostream>
-#include <igl/opengl/glfw/Viewer.h>
-#include <igl/exact_geodesic.h>
 #include <igl/unproject_onto_mesh.h>
 #include <igl/parula.h>
 #include <igl/PI.h>
+#include <igl/exact_geodesic.h>
+
 #include <igl/isolines.h>
 #include <igl/readOBJ.h>
+#include <igl/opengl/glfw/Viewer.h>
+#include <iostream>
+
 
 
 
@@ -17,8 +19,8 @@ int main(int argc, char* argv[])
   Eigen::MatrixXi F;
   igl::opengl::glfw::Viewer viewer;
 
-  // Load a mesh in OFF format
-  igl::readOFF("man.off", V, F);
+  // Load a mesh in OBJ format
+  igl::readOBJ("geomesh/for timing/dragon.obj", V, F);
 
   const auto update_distance = [&](const int vid)
   {
@@ -39,7 +41,7 @@ int main(int argc, char* argv[])
 
     Eigen::MatrixXd CM;
     igl::parula(Eigen::VectorXd::LinSpaced(21,0,1).eval(),false,CM);
-    igl::isolines_map(Eigen::MatrixXd(CM),CM);
+    //igl::isolines_map(Eigen::MatrixXd(CM),CM);
     viewer.data().set_colormap(CM);
     viewer.data().set_data(d);
   };
