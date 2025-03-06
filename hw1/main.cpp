@@ -1,47 +1,42 @@
-#include <igl/unproject_onto_mesh.h>
-#include <igl/parula.h>
-#include <igl/PI.h>
-#include <igl/exact_geodesic.h>
-
-#include <igl/isolines.h>
 #include <igl/readOBJ.h>
 #include <igl/opengl/glfw/Viewer.h>
+#include <igl/exact_geodesic.h>
+#include <igl/unproject_onto_mesh.h>
+#include <igl/parula.h>
+#include <igl/isolines_map.h>
+#include <igl/PI.h>
 #include <iostream>
 
 
 
-
-int main(int argc, char* argv[])
+int main(int argc, char *argv[])
 {
   using namespace Eigen;
   using namespace std;
   Eigen::MatrixXd V;
   Eigen::MatrixXi F;
   igl::opengl::glfw::Viewer viewer;
-
   // Load a mesh in OBJ format
-  igl::readOBJ("geomesh/for timing/dragon.obj", V, F);
+  //igl::readOBJ("/home/cago/Digital-Geometry-Processing/hw1/dragon.obj", V, F);
+
+  // Load a mesh in OFF format
+  igl::readOFF("/home/cago/Digital-Geometry-Processing/hw1/man.off",V,F);
 
   const auto update_distance = [&](const int vid)
   {
-    Eigen::VectorXi VS, FS, VT, FT;
+    Eigen::VectorXi VS,FS,VT,FT;
     // The selected vertex is the source
-
     VS.resize(1);
     VS << vid;
-
     // All vertices are the targets
-    VT.setLinSpaced(V.rows(), 0, V.rows() - 1);
+    VT.setLinSpaced(V.rows(),0,V.rows()-1);
     Eigen::VectorXd d;
-
-    std::cout << "Computing geodesic distance from vertex " << vid <<"....\n" ;
-    igl::exact_geodesic(V, F, VS, FS, VT, FT, d);
-
+    std::cout<<"Computing geodesic distance to vertex "<<vid<<"..."<<std::endl;
+    igl::exact_geodesic(V,F,VS,FS,VT,FT,d);
     // Plot the mesh
-
     Eigen::MatrixXd CM;
     igl::parula(Eigen::VectorXd::LinSpaced(21,0,1).eval(),false,CM);
-    //igl::isolines_map(Eigen::MatrixXd(CM),CM);
+    igl::isolines_map(Eigen::MatrixXd(CM),CM);
     viewer.data().set_colormap(CM);
     viewer.data().set_data(d);
   };
@@ -79,8 +74,8 @@ int main(int argc, char* argv[])
   cout << "Click on mesh to define new source.\n" << std::endl;
   update_distance(0);
   return viewer.launch();
-
 }
+
 
 
 // int main(int argc, char *argv[])
