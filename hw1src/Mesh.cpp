@@ -1,9 +1,16 @@
+#include <cstdio>
+
 #include "Mesh.h"
 
 
 void Mesh::loadOff(char* name)
 {
 	FILE* fPtr = fopen(name, "r");
+	if (!fPtr){
+		printf("Error opening file %s\n", name);
+		exit(1);
+	}
+	
 	char str[334];
 
 	fscanf(fPtr, "%s", str);

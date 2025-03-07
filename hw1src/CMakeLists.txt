@@ -1,33 +1,44 @@
-cmake_minimum_required(VERSION 3.10.0)
-project(hw1 VERSION 0.1.0 LANGUAGES C CXX)
+cmake_minimum_required(VERSION 3.10)
+project(Assignment1)
 
-# Set the Coin3D include and library directories.
-# These can be overridden via the environment variables COIN3D_INCLUDE_DIR and COIN3D_LIB_DIR.
-if(DEFINED ENV{COIN3D_INCLUDE_DIR})
-    set(COIN3D_INCLUDE_DIR $ENV{COIN3D_INCLUDE_DIR})
-else()
-    set(COIN3D_INCLUDE_DIR "/home/cago/Digital-Geometry-Processing/Coin3D/include")
-endif()
+# Use C++11 (or later)
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-if(DEFINED ENV{COIN3D_LIB_DIR})
-    set(COIN3D_LIB_DIR $ENV{COIN3D_LIB_DIR})
-else()
-    set(COIN3D_LIB_DIR "/home/cago/Digital-Geometry-Processing/Coin3D/lib")
-endif()
+# Define that we are using the DLL version of Coin3D and SoWin.
+add_definitions(-DCOIN_DLL -DSOWIN_DLL)
 
-# Add the Coin3D include directory.
-include_directories(${COIN3D_INCLUDE_DIR})
+# Set the path to the Coin3D include and lib directory.
+include_directories("C:/Users/cagopa/Desktop/Digital-Geometry-Processing/Coin3D/include")
 
-# Add the Coin3D library directory.
-link_directories(${COIN3D_LIB_DIR})
+# List your source files.
+set(SOURCES
+    "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw1src/main.cpp"
+    "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw1src/Mesh.cpp"
+    "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw1src/Painter.cpp"
+)
 
-# Add the executable source.
-add_executable(hw1 main.cpp)
+# Create the executable target.
+add_executable(Assignment1 ${SOURCES})
 
-# (Optional) If required by Coin3D, define preprocessor symbols.
-target_compile_definitions(hw1 PRIVATE COIN_DLL SOWIN_DLL)
+# Specify the directory where the Coin3D libraries are located.
+link_directories("C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw1src")
 
-# Link against the Coin3D libraries.
-# On Linux the libraries are typically named libcoin2d.so and libsowin1d.so.
-target_link_libraries(hw1 coin2d sowin1d)
+# Link against the required Coin3D libraries.
+target_link_libraries(Assignment1 
+    "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw1src/coin2d.lib"
+    "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw1src/sowin1d.lib"
+)
 
+# Copy the required DLLs to the output directory after building.
+add_custom_command(TARGET Assignment1 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/Coin3D/bin/coin2d.dll"
+        $<TARGET_FILE_DIR:Assignment1>
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/Coin3D/bin/sowin1d.dll"
+        $<TARGET_FILE_DIR:Assignment1>
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw1src/msvcr71d.dll"
+        $<TARGET_FILE_DIR:Assignment1>
+)

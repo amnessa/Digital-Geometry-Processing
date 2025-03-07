@@ -1,7 +1,7 @@
 #pragma once
 
 #include <vector>
-
+#include <cstdio>
 using namespace std;
 
 struct Vertex

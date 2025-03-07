@@ -1,3 +1,5 @@
+#include <stdint.h>
+
 #include <Inventor/nodes/SoMaterial.h>
 #include <Inventor/nodes/SoCoordinate3.h>
 #include <Inventor/nodes/SoIndexedFaceSet.h>

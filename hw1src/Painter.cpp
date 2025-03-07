@@ -1,3 +1,5 @@
+#include <stdint.h>
+
 #include "Painter.h"
 
 SoSeparator* Painter::getShapeSep(Mesh* mesh)

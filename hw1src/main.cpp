@@ -1,12 +1,16 @@
-#include "Mesh.h"
-#include "Painter.h"
 #include <stdio.h>
 #include <cstdlib>
 #include <time.h>
+#include <stdint.h>
+#include <cfloat>
 #include <Inventor/Win/SoWin.h>
 #include <Inventor/Win/viewers/SoWinExaminerViewer.h>
 #include <Inventor/nodes/SoSeparator.h>
 #include <Inventor/nodes/SoCone.h>
+#include "Mesh.h"
+#include "Painter.h"
+
+
 
 using namespace std;
 
@@ -29,7 +33,7 @@ int main(int, char** argv)
 
 	Mesh* mesh = new Mesh();
 	Painter* painter = new Painter();
-	mesh->loadOff("man0.off");
+	mesh->loadOff("C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw1src/man0.off");
 
 	int N = mesh->verts.size();
 	float **M;
@@ -91,9 +95,11 @@ int main(int, char** argv)
 		M_print[i] = Dijkstra(M, i, 0, N, prev);
 	}
 
-	FILE* matrix_text;
-
-	matrix_text = fopen("geodesic_distance_matrix.txt", "w+");
+	FILE* matrix_text = fopen("geodesic_distance_matrix.txt", "w+");
+	if (!matrix_text) {
+		printf("Failed to open geodesic_distance_matrix.txt for writing.\n");
+		exit(1);
+	}
 
 	for (int y = 0; y < N; y++) {
 		fprintf(matrix_text, "\n");
@@ -134,7 +140,7 @@ float* Dijkstra(float** M, int src,int targ, int N, int* prev )
 	for (int i = 0; i < N; i++)
 	{
 		prev[i] = -1; //source node
-		dist[i] = INT_MAX;
+		dist[i] = FLT_MAX;
 		marked[i] = false;
 	}
 	dist[src] = 0;
@@ -153,7 +159,7 @@ float* Dijkstra(float** M, int src,int targ, int N, int* prev )
 			}
 		}
 	}
-	delete marked;
+	delete[] marked;
 	return dist;
 }
 
