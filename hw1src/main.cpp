@@ -241,7 +241,7 @@ void computeAndVisualizePatches() {
 		g_root->removeChild(1);
 	}
 	
-	cout << "Computing geodesic loop from FPS points..." << endl;
+	cout << "Computing geodesic paths and intersections..." << endl;
 	
 	// Get farthest point samples
 	int numFPS = 4;
@@ -252,51 +252,82 @@ void computeAndVisualizePatches() {
 		return;
 	}
 	
-	// Find better ordering of FPS points to minimize intersections
-	vector<int> orderedSamples;
-	vector<bool> visited(numFPS, false);
 	int N = g_mesh->verts.size();
 	
-	// Start with first FPS point
-	int currentIdx = 0;
-	orderedSamples.push_back(samples[currentIdx]);
-	visited[currentIdx] = true;
+	// Compute all pairs of geodesic paths between FPS points
+	vector<vector<int>> paths;
 	
-	// Find remaining points in order of shortest path
-	for (int i = 1; i < numFPS; i++) {
-		float minDist = FLT_MAX;
-		int nextIdx = -1;
-		
-		// Find closest unvisited FPS point
-		for (int j = 0; j < numFPS; j++) {
-			if (!visited[j]) {
-				// Compute path to evaluate length
-				vector<int> path = computeGeodesicPath(samples[currentIdx], samples[j]);
-				if (!path.empty()) {
-					float pathLength = path.size(); // Use path length as distance
-					if (pathLength < minDist) {
-						minDist = pathLength;
-						nextIdx = j;
+	for (int i = 0; i < numFPS; i++) {
+		for (int j = i + 1; j < numFPS; j++) {
+			vector<int> path = computeGeodesicPath(samples[i], samples[j]);
+			if (!path.empty()) {
+				paths.push_back(path);
+				cout << "Computed path from " << samples[i] << " to " << samples[j] 
+					 << " with " << path.size() << " vertices" << endl;
+			}
+		}
+	}
+	
+	// Find intersections between paths
+	set<int> intersections;
+	for (size_t i = 0; i < paths.size(); i++) {
+		for (size_t j = i + 1; j < paths.size(); j++) {
+			// Find intersection points
+			for (int v1 : paths[i]) {
+				for (int v2 : paths[j]) {
+					if (v1 == v2 && v1 != samples[0] && v1 != samples[1] 
+							  && v1 != samples[2] && v1 != samples[3]) {
+						intersections.insert(v1);
+						cout << "Found intersection at vertex " << v1 << endl;
 					}
 				}
 			}
 		}
+	}
+	
+	if (intersections.empty()) {
+		cout << "No intersections found between geodesic paths!" << endl;
 		
-		if (nextIdx != -1) {
-			orderedSamples.push_back(samples[nextIdx]);
-			visited[nextIdx] = true;
-			currentIdx = nextIdx;
+		// Highlight FPS points with distinct larger points
+		SoSeparator* fpsSep = new SoSeparator();
+		for (int i = 0; i < samples.size(); i++) {
+			// Different color for each FPS point
+			float r = (i == 0) ? 1.0f : 0.0f;
+			float g = (i == 1) ? 1.0f : 0.0f;
+			float b = (i == 2) ? 1.0f : 0.0f;
+			
+			if (i == 3) r = g = 1.0f; // Yellow for last point
+			
+			fpsSep->addChild(g_painter->get1PointSep(g_mesh, samples[i], r, g, b, 8.0f, false));
+			cout << "FPS " << i << " is vertex " << samples[i] << endl;
 		}
+		g_root->addChild(fpsSep);
+		
+		// Draw the paths between FPS points
+		SoSeparator* pathsSep = new SoSeparator();
+		SoMaterial* pathsMat = new SoMaterial();
+		pathsMat->diffuseColor.setValue(0, 1, 0); // Green for paths
+		pathsSep->addChild(pathsMat);
+		
+		for (int i = 0; i < numFPS; i++) {
+			for (int j = i + 1; j < numFPS; j++) {
+				int* prev = g_mesh->findShortestPath(samples[i], N);
+				if (prev) {
+					pathsSep->addChild(g_painter->DrawLines(g_mesh, samples[i], samples[j], N, prev));
+					delete[] prev;
+				}
+			}
+		}
+		g_root->addChild(pathsSep);
+		
+		// Update viewer
+		g_viewer->viewAll();
+		return;
 	}
 	
-	cout << "Optimized FPS order: ";
-	for (int idx : orderedSamples) {
-		cout << idx << " ";
-	}
-	cout << endl;
-	
-	// Connect FPS points in optimized sequence
-	cout << "Connecting FPS points in optimized sequence..." << endl;
+	// Choose the first intersection as our geodesic center
+	int geodesicCenter = *intersections.begin();
+	cout << "Using vertex " << geodesicCenter << " as geodesic center" << endl;
 	
 	// Create a separator for the geodesic paths
 	SoSeparator* pathsSep = new SoSeparator();
@@ -304,33 +335,30 @@ void computeAndVisualizePatches() {
 	pathsMat->diffuseColor.setValue(0, 1, 0); // Green for paths
 	pathsSep->addChild(pathsMat);
 	
-	// Collect all vertices in the complete loop
+	// Collect all vertices in all paths
 	vector<int> allPathVertices;
 	
+	// Create paths from geodesic center to each FPS point
 	for (int i = 0; i < numFPS; i++) {
-		int source = orderedSamples[i];
-		int target = orderedSamples[(i + 1) % numFPS]; // Wrap around to first point
+		int target = samples[i];
 		
-		cout << "Computing path from FPS vertex " << source 
-			 << " to FPS vertex " << target << endl;
-		
-		// Compute geodesic path using Dijkstra
-		vector<int> path = computeGeodesicPath(source, target);
+		// Compute geodesic path from center to FPS point
+		vector<int> path = computeGeodesicPath(geodesicCenter, target);
 		
 		if (!path.empty()) {
-			// Add path vertices to overall loop vertices
+			// Add path vertices to overall collection
 			allPathVertices.insert(allPathVertices.end(), path.begin(), path.end());
 			
 			// Visualize this path segment
-			int* prev = g_mesh->findShortestPath(source, N);
+			int* prev = g_mesh->findShortestPath(geodesicCenter, N);
 			if (prev) {
-				pathsSep->addChild(g_painter->DrawLines(g_mesh, source, target, N, prev));
+				pathsSep->addChild(g_painter->DrawLines(g_mesh, geodesicCenter, target, N, prev));
 				delete[] prev;
-				cout << "Added path from " << source << " to " << target << " with " 
-					 << path.size() << " vertices" << endl;
+				cout << "Added path from geodesic center to FPS " << i 
+					 << " with " << path.size() << " vertices" << endl;
 			}
 		} else {
-			cout << "Failed to compute path from " << source << " to " << target << "!" << endl;
+			cout << "Failed to compute path from center to " << target << "!" << endl;
 		}
 	}
 	
@@ -342,15 +370,24 @@ void computeAndVisualizePatches() {
 	pointsMat->diffuseColor.setValue(0, 1, 0); // Green
 	allPointsSep->addChild(pointsMat);
 	
-	// Add individual points for every vertex in the geodesic loop
+	// Add individual points for every vertex in all geodesic paths
 	for (int vertIdx : allPathVertices) {
 		allPointsSep->addChild(g_painter->get1PointSep(g_mesh, vertIdx, 0, 1, 0, 3.0f, false));
 	}
 	g_root->addChild(allPointsSep);
 	
+	// Highlight geodesic center in purple
+	SoSeparator* centerSep = new SoSeparator();
+	SoMaterial* centerMat = new SoMaterial();
+	centerMat->diffuseColor.setValue(1, 0, 1); // Purple for center
+	centerSep->addChild(centerMat);
+	centerSep->addChild(g_painter->get1PointSep(g_mesh, geodesicCenter, 1, 0, 1, 10.0f, false));
+	g_root->addChild(centerSep);
+	cout << "Highlighted geodesic center (purple)" << endl;
+	
 	// Highlight FPS points with distinct larger points
 	SoSeparator* fpsSep = new SoSeparator();
-	for (int i = 0; i < orderedSamples.size(); i++) {
+	for (int i = 0; i < samples.size(); i++) {
 		// Different color for each FPS point
 		float r = (i == 0) ? 1.0f : 0.0f;
 		float g = (i == 1) ? 1.0f : 0.0f;
@@ -358,12 +395,12 @@ void computeAndVisualizePatches() {
 		
 		if (i == 3) r = g = 1.0f; // Yellow for last point
 		
-		fpsSep->addChild(g_painter->get1PointSep(g_mesh, orderedSamples[i], r, g, b, 8.0f, false));
-		cout << "FPS " << i << " is vertex " << orderedSamples[i] << endl;
+		fpsSep->addChild(g_painter->get1PointSep(g_mesh, samples[i], r, g, b, 8.0f, false));
+		cout << "FPS " << i << " is vertex " << samples[i] << endl;
 	}
 	g_root->addChild(fpsSep);
 	
-	cout << "Loop visualization complete with " << allPathVertices.size() << " total points." << endl;
+	cout << "Patch visualization complete with " << allPathVertices.size() << " total path vertices." << endl;
 	
 	// Update viewer
 	g_viewer->viewAll();
