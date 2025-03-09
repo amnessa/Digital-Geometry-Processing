@@ -232,22 +232,19 @@ void visualizeFarthestPointSampling(int numSamples) {
 
 // Function to compute and visualize patches
 void computeAndVisualizePatches() {
-	// Load mesh from segeval if not already loaded
-	string meshPath = "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw1src/249.off";
+	// Load mesh
+	string meshPath = "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw1src/348.off";
 	loadNewMesh(meshPath);
 	
-	// Clear previous visualization (except base mesh)
+	// Clear previous visualization
 	while (g_root->getNumChildren() > 1) {
 		g_root->removeChild(1);
 	}
 	
-	cout << "Computing patch extraction from FPS points..." << endl;
+	cout << "Computing geodesic loop from FPS points..." << endl;
 	
-	// Ask user for number of FPS points
+	// Get farthest point samples
 	int numFPS = 4;
-	cout << "Using " << numFPS << " farthest point samples." << endl;
-	
-	// 1. Compute farthest point sampling to get landmark vertices
 	vector<int> samples = g_mesh->farthestPointSampling(numFPS);
 	
 	if (samples.size() != numFPS) {
@@ -255,75 +252,118 @@ void computeAndVisualizePatches() {
 		return;
 	}
 	
-	// 2. Compute geodesic paths between consecutive FPS points to form a boundary
-	vector<vector<int>> boundaryPaths;
+	// Find better ordering of FPS points to minimize intersections
+	vector<int> orderedSamples;
+	vector<bool> visited(numFPS, false);
+	int N = g_mesh->verts.size();
 	
-	// Create a separator for the boundary
-	SoSeparator* boundarySep = new SoSeparator();
-	SoMaterial* boundaryMat = new SoMaterial();
-	boundaryMat->diffuseColor.setValue(1, 0, 0); // Red
-	boundarySep->addChild(boundaryMat);
+	// Start with first FPS point
+	int currentIdx = 0;
+	orderedSamples.push_back(samples[currentIdx]);
+	visited[currentIdx] = true;
 	
-	// Set line style
-	SoDrawStyle* lineStyle = new SoDrawStyle();
-	lineStyle->lineWidth = 4.0f;
-	boundarySep->addChild(lineStyle);
+	// Find remaining points in order of shortest path
+	for (int i = 1; i < numFPS; i++) {
+		float minDist = FLT_MAX;
+		int nextIdx = -1;
+		
+		// Find closest unvisited FPS point
+		for (int j = 0; j < numFPS; j++) {
+			if (!visited[j]) {
+				// Compute path to evaluate length
+				vector<int> path = computeGeodesicPath(samples[currentIdx], samples[j]);
+				if (!path.empty()) {
+					float pathLength = path.size(); // Use path length as distance
+					if (pathLength < minDist) {
+						minDist = pathLength;
+						nextIdx = j;
+					}
+				}
+			}
+		}
+		
+		if (nextIdx != -1) {
+			orderedSamples.push_back(samples[nextIdx]);
+			visited[nextIdx] = true;
+			currentIdx = nextIdx;
+		}
+	}
 	
-	// Compute paths between consecutive points and the last to the first
-	cout << "Computing boundary paths..." << endl;
+	cout << "Optimized FPS order: ";
+	for (int idx : orderedSamples) {
+		cout << idx << " ";
+	}
+	cout << endl;
+	
+	// Connect FPS points in optimized sequence
+	cout << "Connecting FPS points in optimized sequence..." << endl;
+	
+	// Create a separator for the geodesic paths
+	SoSeparator* pathsSep = new SoSeparator();
+	SoMaterial* pathsMat = new SoMaterial();
+	pathsMat->diffuseColor.setValue(0, 1, 0); // Green for paths
+	pathsSep->addChild(pathsMat);
+	
+	// Collect all vertices in the complete loop
+	vector<int> allPathVertices;
 	
 	for (int i = 0; i < numFPS; i++) {
-		int source = samples[i];
-		int target = samples[(i + 1) % numFPS]; // Wrap around to the first point
+		int source = orderedSamples[i];
+		int target = orderedSamples[(i + 1) % numFPS]; // Wrap around to first point
 		
+		cout << "Computing path from FPS vertex " << source 
+			 << " to FPS vertex " << target << endl;
+		
+		// Compute geodesic path using Dijkstra
 		vector<int> path = computeGeodesicPath(source, target);
+		
 		if (!path.empty()) {
-			boundaryPaths.push_back(path);
+			// Add path vertices to overall loop vertices
+			allPathVertices.insert(allPathVertices.end(), path.begin(), path.end());
 			
-			// Visualize this path
-			int N = g_mesh->verts.size();
+			// Visualize this path segment
 			int* prev = g_mesh->findShortestPath(source, N);
 			if (prev) {
-				boundarySep->addChild(g_painter->DrawLines(g_mesh, source, target, N, prev));
+				pathsSep->addChild(g_painter->DrawLines(g_mesh, source, target, N, prev));
 				delete[] prev;
+				cout << "Added path from " << source << " to " << target << " with " 
+					 << path.size() << " vertices" << endl;
 			}
-			
-			cout << "Added boundary path from " << source << " to " << target 
-				 << " with " << path.size() << " vertices." << endl;
 		} else {
-			cout << "Failed to compute path from " << source << " to " << target << endl;
+			cout << "Failed to compute path from " << source << " to " << target << "!" << endl;
 		}
 	}
 	
-	g_root->addChild(boundarySep);
+	g_root->addChild(pathsSep);
 	
-	// 3. Create a single set of all vertices in the boundary
-	std::set<int> boundaryVertices;
-	for (const auto& path : boundaryPaths) {
-		boundaryVertices.insert(path.begin(), path.end());
+	// Highlight all vertices along paths with small green points
+	SoSeparator* allPointsSep = new SoSeparator();
+	SoMaterial* pointsMat = new SoMaterial();
+	pointsMat->diffuseColor.setValue(0, 1, 0); // Green
+	allPointsSep->addChild(pointsMat);
+	
+	// Add individual points for every vertex in the geodesic loop
+	for (int vertIdx : allPathVertices) {
+		allPointsSep->addChild(g_painter->get1PointSep(g_mesh, vertIdx, 0, 1, 0, 3.0f, false));
 	}
+	g_root->addChild(allPointsSep);
 	
-	cout << "Boundary contains " << boundaryVertices.size() << " unique vertices." << endl;
-	
-	// 5. Visualize the path points and boundary vertices
-	// Draw the boundary vertices with same method as FPS points but green
-	SoSeparator* patchSep = new SoSeparator();
-	for (int vIdx : boundaryVertices) {
-		if (vIdx >= 0 && vIdx < g_mesh->verts.size()) {
-			// Use the exact same method as for FPS points, just with green color
-			patchSep->addChild(g_painter->get1PointSep(g_mesh, vIdx, 0, 1, 0, 3.0f, false));
-		}
-	}
-	g_root->addChild(patchSep);
-	
-	// Also draw the FPS points with a distinct color
+	// Highlight FPS points with distinct larger points
 	SoSeparator* fpsSep = new SoSeparator();
-	for (int sample : samples) {
-		fpsSep->addChild(g_painter->get1PointSep(g_mesh, sample, 1, 1, 0, 6.0f, false));
+	for (int i = 0; i < orderedSamples.size(); i++) {
+		// Different color for each FPS point
+		float r = (i == 0) ? 1.0f : 0.0f;
+		float g = (i == 1) ? 1.0f : 0.0f;
+		float b = (i == 2) ? 1.0f : 0.0f;
+		
+		if (i == 3) r = g = 1.0f; // Yellow for last point
+		
+		fpsSep->addChild(g_painter->get1PointSep(g_mesh, orderedSamples[i], r, g, b, 8.0f, false));
+		cout << "FPS " << i << " is vertex " << orderedSamples[i] << endl;
 	}
 	g_root->addChild(fpsSep);
 	
-	cout << "Path visualization complete." << endl;
+	cout << "Loop visualization complete with " << allPathVertices.size() << " total points." << endl;
 	
 	// Update viewer
 	g_viewer->viewAll();
