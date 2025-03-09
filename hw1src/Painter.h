@@ -21,4 +21,6 @@ public:
 	SoSeparator* paintNeighbours(Mesh* mesh, int pnt);
 	SoSeparator* DrawLines(Mesh* mesh,int source,int targ,int N, int* prev);
 	vector<int> getPath(int* prev, int source, int targ, int N);
+	SoSeparator* visualizeSampledPoints(Mesh* mesh, vector<int>& samples);
+	SoSeparator* visualizePatches(Mesh* mesh, vector<vector<int>>& patches);
 };

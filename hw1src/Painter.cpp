@@ -65,32 +65,70 @@ SoSeparator* Painter::getShapeSep(Mesh* mesh)
 
 	return res;
 }
-SoSeparator* Painter::DrawLines(Mesh* mesh, int source, int targ, int N, int* prev) {
-	SoSeparator* lineSep = new SoSeparator;
-	Painter* paint = new Painter();
-	//material
-	SoMaterial* ma = new SoMaterial;
-	ma->diffuseColor.set1Value(0, 1.0f, 0.0f, 0.0f);
-	lineSep->addChild(ma);
-	SoDrawStyle* sty = new SoDrawStyle;	sty->lineWidth = 8.0f;	lineSep->addChild(sty);
-
-	SoIndexedLineSet* ils = new SoIndexedLineSet;
-	SoCoordinate3* co = new SoCoordinate3;
-	vector<int> path = getPath(prev, source, targ, N);
-	for (unsigned int se = 0; se < path.size(); se++)
-	{
-		SbVec3f end1 = mesh->verts[path[se]]->coords + SbVec3f(0.0f, 0.0f, 0.0f);
-
-		co->point.set1Value(se, end1);
+SoSeparator* Painter::DrawLines(Mesh* mesh, int source, int target, int N, int* prev) {
+	SoSeparator* lineSep = new SoSeparator();
+	
+	// Safety check - ensure source and target are valid and different
+	if (source < 0 || source >= N || target < 0 || target >= N || source == target) {
+		return lineSep;  // Return empty separator
 	}
-
-	for (unsigned int ci = 0; ci < path.size()-1; ci++)
-	{
-		ils->coordIndex.set1Value(3 * ci, ci);	ils->coordIndex.set1Value(3 * ci + 1, ci + 1);
-		ils->coordIndex.set1Value(3 * ci + 2, -1);
+	
+	// Get the path
+	vector<int> path;
+	int at = target;
+	while (at != source && at != -1) {
+		path.push_back(at);
+		at = prev[at];
 	}
-	lineSep->addChild(co);
-	lineSep->addChild(ils);
+	
+	// Add source if path completed successfully
+	if (at == source) {
+		path.push_back(source);
+	} else {
+		// Path not found
+		return lineSep;
+	}
+	
+	// Reverse to get from source to target
+	reverse(path.begin(), path.end());
+	
+	// Safety check - need at least two points for a line
+	if (path.size() < 2) {
+		return lineSep;
+	}
+	
+	// Style and material setup
+	SoMaterial* mat = new SoMaterial();
+	mat->diffuseColor.setValue(1, 0, 0); // Red path
+	lineSep->addChild(mat);
+	
+	SoDrawStyle* style = new SoDrawStyle();
+	style->lineWidth = 3.0f;
+	lineSep->addChild(style);
+	
+	// Create coordinates for path vertices
+	SoCoordinate3* coords = new SoCoordinate3();
+	for (unsigned int i = 0; i < path.size(); i++) {
+		int vertIdx = path[i];
+		if (vertIdx >= 0 && vertIdx < mesh->verts.size()) {
+			coords->point.set1Value(i, 
+				mesh->verts[vertIdx]->coords[0],
+				mesh->verts[vertIdx]->coords[1],
+				mesh->verts[vertIdx]->coords[2]);
+		}
+	}
+	lineSep->addChild(coords);
+	
+	// Create indexed line set
+	SoIndexedLineSet* lineSet = new SoIndexedLineSet();
+	int coordIndex = 0;
+	for (unsigned int i = 0; i < path.size() - 1; i++) {
+		lineSet->coordIndex.set1Value(coordIndex++, i);
+		lineSet->coordIndex.set1Value(coordIndex++, i+1);
+	}
+	lineSet->coordIndex.set1Value(coordIndex, -1);
+	
+	lineSep->addChild(lineSet);
 	return lineSep;
 }
 	
@@ -163,4 +201,33 @@ SoSeparator* Painter::paintNeighbours(Mesh* mesh, int pnt) {
 	pSet->vertexProperty = vp;
 	pntSep->addChild(pSet);
 	return pntSep;
+}
+
+SoSeparator* Painter::visualizeSampledPoints(Mesh* mesh, vector<int>& samples) {
+    SoSeparator* pointsSep = new SoSeparator();
+    
+    // Material for sample points
+    SoMaterial* mat = new SoMaterial();
+    mat->diffuseColor.setValue(0, 1, 0); // Green
+    pointsSep->addChild(mat);
+    
+    // Style for sample points (larger)
+    SoDrawStyle* style = new SoDrawStyle();
+    style->pointSize = 10.0f;
+    pointsSep->addChild(style);
+    
+    // Create coordinates for sample points
+    SoCoordinate3* coords = new SoCoordinate3();
+    for (int i = 0; i < samples.size(); i++) {
+        int vertIdx = samples[i];
+        coords->point.set1Value(i, mesh->verts[vertIdx]->coords);
+    }
+    pointsSep->addChild(coords);
+    
+    // Create point set
+    SoPointSet* pointSet = new SoPointSet();
+    pointSet->numPoints = samples.size();
+    pointsSep->addChild(pointSet);
+    
+    return pointsSep;
 }

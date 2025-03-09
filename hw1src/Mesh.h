@@ -48,8 +48,22 @@ public:
 	vector< Triangle* > tris;
 	vector< Edge* > edges;
 
+	struct PathIntersection {
+		int segmentIndex1;
+		int segmentIndex2;
+		float parameter1;  // Between 0 and 1
+		float parameter2;  // Between 0 and 1
+		float coords[3];   // 3D coordinates
+	};
 
 	Mesh() {};
 	void createCube(float side);
 	void loadOff(char* name);
+	int* findShortestPath(int source, int& N);
+	float* computeGeodesicDistances(int source, int& N);
+	void computeGeodesicDistanceMatrix(const char* outputFile);
+	vector<int> farthestPointSampling(int numSamples, int seedVertex = 0);
+	vector<PathIntersection> findPathIntersections(vector<int>& path1, vector<int>& path2);
+	void createPatches(vector<int>& sampledVertices);
+	void normalizeCoordinates();
 };
