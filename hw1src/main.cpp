@@ -233,7 +233,7 @@ void visualizeFarthestPointSampling(int numSamples) {
 // Function to compute and visualize patches
 void computeAndVisualizePatches() {
 	// Load mesh
-	string meshPath = "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw1src/348.off";
+	string meshPath = "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw1src/249.off";
 	loadNewMesh(meshPath);
 	
 	// Clear previous visualization
@@ -329,16 +329,23 @@ void computeAndVisualizePatches() {
 	int geodesicCenter = *intersections.begin();
 	cout << "Using vertex " << geodesicCenter << " as geodesic center" << endl;
 	
-	// Create a separator for the geodesic paths
-	SoSeparator* pathsSep = new SoSeparator();
-	SoMaterial* pathsMat = new SoMaterial();
-	pathsMat->diffuseColor.setValue(0, 1, 0); // Green for paths
-	pathsSep->addChild(pathsMat);
+	// MAP 1: Create a separator for the center-to-FPS geodesic paths (star pattern)
+	SoSeparator* map1Sep = new SoSeparator();
+	SoMaterial* map1Mat = new SoMaterial();
+	map1Mat->diffuseColor.setValue(0, 1, 0); // Green for map1 (star) paths
+	map1Sep->addChild(map1Mat);
+	
+	// MAP 2: Create a separator for the FPS-to-FPS geodesic paths (loop with mixed order)
+	SoSeparator* map2Sep = new SoSeparator();
+	SoMaterial* map2Mat = new SoMaterial();
+	map2Mat->diffuseColor.setValue(0, 0, 1); // Blue for map2 (loop) paths
+	map2Sep->addChild(map2Mat);
 	
 	// Collect all vertices in all paths
 	vector<int> allPathVertices;
 	
-	// Create paths from geodesic center to each FPS point
+	// MAP 1: Create star paths from geodesic center to each FPS point
+	cout << "Creating MAP 1: Star paths from geodesic center to FPS points..." << endl;
 	for (int i = 0; i < numFPS; i++) {
 		int target = samples[i];
 		
@@ -352,9 +359,9 @@ void computeAndVisualizePatches() {
 			// Visualize this path segment
 			int* prev = g_mesh->findShortestPath(geodesicCenter, N);
 			if (prev) {
-				pathsSep->addChild(g_painter->DrawLines(g_mesh, geodesicCenter, target, N, prev));
+				map1Sep->addChild(g_painter->DrawLines(g_mesh, geodesicCenter, target, N, prev));
 				delete[] prev;
-				cout << "Added path from geodesic center to FPS " << i 
+				cout << "Added MAP 1 path from geodesic center to FPS " << i 
 					 << " with " << path.size() << " vertices" << endl;
 			}
 		} else {
@@ -362,7 +369,38 @@ void computeAndVisualizePatches() {
 		}
 	}
 	
-	g_root->addChild(pathsSep);
+	// MAP 2: Create loop paths between FPS points in a mixed order
+	cout << "Creating MAP 2: Loop paths between FPS points in mixed order..." << endl;
+	// Instead of sequential 0→1→2→3→0, use 0→2→1→3→0 to create a crossing pattern
+	int loopOrder[4] = {0, 2, 1, 3}; // Non-sequential order to create a distinct path
+	
+	for (int i = 0; i < numFPS; i++) {
+		int source = samples[loopOrder[i]];
+		int target = samples[loopOrder[(i + 1) % numFPS]]; // Connect to next in our custom order
+		
+		// Compute geodesic path between FPS points
+		vector<int> path = computeGeodesicPath(source, target);
+		
+		if (!path.empty()) {
+			// Add path vertices to overall collection
+			allPathVertices.insert(allPathVertices.end(), path.begin(), path.end());
+			
+			// Visualize this path segment
+			int* prev = g_mesh->findShortestPath(source, N);
+			if (prev) {
+				map2Sep->addChild(g_painter->DrawLines(g_mesh, source, target, N, prev));
+				delete[] prev;
+				cout << "Added MAP 2 path from FPS " << loopOrder[i] << " to FPS " << loopOrder[(i + 1) % numFPS]
+					 << " with " << path.size() << " vertices" << endl;
+			}
+		} else {
+			cout << "Failed to compute path from " << source << " to " << target << "!" << endl;
+		}
+	}
+	
+	// Add both map separators to scene
+	g_root->addChild(map1Sep);
+	g_root->addChild(map2Sep);
 	
 	// Highlight all vertices along paths with small green points
 	SoSeparator* allPointsSep = new SoSeparator();
@@ -400,7 +438,10 @@ void computeAndVisualizePatches() {
 	}
 	g_root->addChild(fpsSep);
 	
-	cout << "Patch visualization complete with " << allPathVertices.size() << " total path vertices." << endl;
+	cout << "Complete patch visualization with:" << endl;
+	cout << " - MAP 1: Green star paths from center to FPS points" << endl;
+	cout << " - MAP 2: Blue loop paths between FPS points in mixed order" << endl;
+	cout << " - Total vertices: " << allPathVertices.size() << endl;
 	
 	// Update viewer
 	g_viewer->viewAll();
