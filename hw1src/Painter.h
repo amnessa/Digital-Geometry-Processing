@@ -23,4 +23,11 @@ public:
 	vector<int> getPath(int* prev, int source, int targ, int N);
 	SoSeparator* visualizeSampledPoints(Mesh* mesh, vector<int>& samples);
 	SoSeparator* visualizePatches(Mesh* mesh, vector<vector<int>>& patches);
+
+private:
+	// Helper function to interpolate points along a curve
+	SbVec3f interpolateAlongCurve(const vector<SbVec3f>& curve, float t);
+	
+	// Helper function to get geodesic path between two vertices
+	vector<int> computeGeodesicPath(int source, int target, Mesh* mesh);
 };

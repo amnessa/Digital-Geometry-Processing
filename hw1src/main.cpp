@@ -307,7 +307,7 @@ vector<int> findOptimalLoopOrder(vector<int>& fpsPoints, Mesh* mesh) {
 // Function to compute and visualize patches
 void computeAndVisualizePatches() {
 	// Load mesh
-	string meshPath = "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw1src/348.off";
+	string meshPath = "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw1src/249.off";
 	loadNewMesh(meshPath);
 	
 	// Clear previous visualization
