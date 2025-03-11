@@ -5,22 +5,22 @@
 SoSeparator* Painter::getShapeSep(Mesh* mesh)
 {
 	SoSeparator* res = new SoSeparator();
-	SoMaterial* mat = new SoMaterial();
-	mat->diffuseColor.setValue(1, 1, 1); 
-
-	bool youWantToPaintEachVertexDifferently = false;
-	bool drawThickEdges = true;
-
-
-
-	res->addChild(mat);
+	
+	// Create the transparent mesh faces
+	SoSeparator* facesSep = new SoSeparator();
+	SoMaterial* facesMat = new SoMaterial();
+	facesMat->diffuseColor.setValue(1, 1, 1);
+	facesMat->transparency = 0.7f; // Make faces transparent
+	facesSep->addChild(facesMat);
 
 	SoShapeHints* hints = new SoShapeHints;
 	hints->creaseAngle = 3.14;
-	res->addChild(hints);
+	facesSep->addChild(hints);
+	
 	SoCoordinate3* coords = new SoCoordinate3();
 	for (int c = 0; c < mesh->verts.size(); c++)
 		coords->point.set1Value(c, mesh->verts[c]->coords[0], mesh->verts[c]->coords[1], mesh->verts[c]->coords[2]);
+	
 	SoIndexedFaceSet* faceSet = new SoIndexedFaceSet();
 	for (int c = 0; c < mesh->tris.size(); c++)
 	{
@@ -29,8 +29,13 @@ SoSeparator* Painter::getShapeSep(Mesh* mesh)
 		faceSet->coordIndex.set1Value(c*4 + 2, mesh->tris[c]->v3i);
 		faceSet->coordIndex.set1Value(c*4 + 3, -1);
 	}
+	
+	facesSep->addChild(coords);
+	facesSep->addChild(faceSet);
+	res->addChild(facesSep);
 
-
+	// Keep the edges with full opacity if drawThickEdges is true
+	bool drawThickEdges = true;
 	if (drawThickEdges)
 	{
 		SoSeparator* thickEdgeSep = new SoSeparator;
@@ -59,9 +64,6 @@ SoSeparator* Painter::getShapeSep(Mesh* mesh)
 		thickEdgeSep->addChild(co);	thickEdgeSep->addChild(ils);
 		res->addChild(thickEdgeSep);
 	}
-
-	res->addChild(coords);
-	res->addChild(faceSet);
 
 	return res;
 }
@@ -132,28 +134,32 @@ SoSeparator* Painter::DrawLines(Mesh* mesh, int source, int target, int N, int* 
 	return lineSep;
 }
 	
-SoSeparator* Painter::get1PointSep(Mesh* obj, int pnt, int drawWhat, float deltaX, float deltaY, float scale, bool showNeighbours)
+SoSeparator* Painter::get1PointSep(Mesh* obj, int pnt, float r, float g, float b, float pointSize, bool showNeighbours)
 {
-
 	Mesh* mesh = obj;
 
 	SoSeparator* pntSep = new SoSeparator;
-	//material
+	
+	// Material with configurable color
 	SoMaterial* mat = new SoMaterial;
-	mat->diffuseColor.setValue(SbColor(0.0f, 1.0f, 0.0f)); //green
+	mat->diffuseColor.setValue(SbColor(r, g, b));
+	mat->emissiveColor.setValue(r*0.3f, g*0.3f, b*0.3f);  // Add some glow
 	pntSep->addChild(mat);
-	SoDrawStyle* style = new SoDrawStyle;
-	style->pointSize = 17.0f;
-	pntSep->addChild(style);
 	
+	// Use a transform to position the sphere
+	SoTransform* xform = new SoTransform;
+	xform->translation.setValue(
+		mesh->verts[pnt]->coords[0],
+		mesh->verts[pnt]->coords[1],
+		mesh->verts[pnt]->coords[2]
+	);
+	pntSep->addChild(xform);
 	
-	//shape
-	SoVertexProperty* vp = new SoVertexProperty;
-	vp->vertex.set1Value(0, scale * mesh->verts[pnt]->coords[0] + deltaX, scale * mesh->verts[pnt]->coords[1] + deltaY, scale * mesh->verts[pnt]->coords[2]);
-	SoPointSet* pSet = new SoPointSet;
-	pSet->numPoints = 1;
-	pSet->vertexProperty = vp;
-	pntSep->addChild(pSet);
+	// Create a sphere with size based on pointSize parameter
+	SoSphere* sphere = new SoSphere;
+	sphere->radius = pointSize * 0.01f; // Scale factor to keep spheres reasonably sized
+	pntSep->addChild(sphere);
+	
 	if(showNeighbours)
 		pntSep->addChild(paintNeighbours(mesh, pnt));
 
@@ -230,4 +236,83 @@ SoSeparator* Painter::visualizeSampledPoints(Mesh* mesh, vector<int>& samples) {
     pointsSep->addChild(pointSet);
     
     return pointsSep;
+}
+
+SoSeparator* Painter::visualizePatches(Mesh* mesh, vector<vector<int>>& patchBoundaries) {
+    SoSeparator* patchesSep = new SoSeparator();
+    
+    SoMaterial* patchMat = new SoMaterial();
+    patchMat->diffuseColor.setValue(0.3f, 0.8f, 0.6f);
+    patchMat->transparency = 0.2f;
+    patchesSep->addChild(patchMat);
+    
+    // Process each patch boundary
+    for (const vector<int>& boundary : patchBoundaries) {
+        if (boundary.size() < 4) continue; // Need at least a quad
+        
+        // Generate a parametric grid within the boundary
+        int gridSize = 10; // Resolution of the patch
+        vector<SbVec3f> gridPoints;
+        vector<int> gridFaces;
+        
+        // For a quadrilateral boundary, generate a bilinear patch
+        if (boundary.size() == 4) {
+            // Get the four corner points
+            SbVec3f p00(mesh->verts[boundary[0]]->coords);
+            SbVec3f p10(mesh->verts[boundary[1]]->coords);
+            SbVec3f p11(mesh->verts[boundary[2]]->coords);
+            SbVec3f p01(mesh->verts[boundary[3]]->coords);
+            
+            // Generate grid using bilinear interpolation
+            for (int i = 0; i <= gridSize; i++) {
+                float u = i / float(gridSize);
+                for (int j = 0; j <= gridSize; j++) {
+                    float v = j / float(gridSize);
+                    
+                    // Bilinear interpolation formula
+                    SbVec3f point = p00 * (1-u) * (1-v) + 
+                                   p10 * u * (1-v) + 
+                                   p11 * u * v + 
+                                   p01 * (1-u) * v;
+                    
+                    gridPoints.push_back(point);
+                    
+                    // Create faces (except for the last row/column)
+                    if (i < gridSize && j < gridSize) {
+                        int idx = i * (gridSize + 1) + j;
+                        // Add two triangles per grid cell
+                        gridFaces.push_back(idx);
+                        gridFaces.push_back(idx + 1);
+                        gridFaces.push_back(idx + gridSize + 1);
+                        gridFaces.push_back(-1);
+                        
+                        gridFaces.push_back(idx + 1);
+                        gridFaces.push_back(idx + gridSize + 2);
+                        gridFaces.push_back(idx + gridSize + 1);
+                        gridFaces.push_back(-1);
+                    }
+                }
+            }
+            
+            // Set up coordinates
+            SoCoordinate3* coords = new SoCoordinate3();
+            for (size_t i = 0; i < gridPoints.size(); i++) {
+                coords->point.set1Value(i, gridPoints[i]);
+            }
+            
+            // Set up face set
+            SoIndexedFaceSet* faceSet = new SoIndexedFaceSet();
+            for (size_t i = 0; i < gridFaces.size(); i++) {
+                faceSet->coordIndex.set1Value(i, gridFaces[i]);
+            }
+            
+            // Add to separator
+            SoSeparator* patchSep = new SoSeparator();
+            patchSep->addChild(coords);
+            patchSep->addChild(faceSet);
+            patchesSep->addChild(patchSep);
+        }
+    }
+    
+    return patchesSep;
 }

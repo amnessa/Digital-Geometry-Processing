@@ -17,7 +17,7 @@ class Painter
 {
 public:
 	SoSeparator* getShapeSep(Mesh* mesh);
-	SoSeparator* get1PointSep(Mesh* obj, int pnt, int drawWhat, float deltaX, float deltaY, float scale, bool showNeighbours=false);
+	SoSeparator* get1PointSep(Mesh* obj, int pnt, float r, float g, float b, float pointSize, bool showNeighbours=false);
 	SoSeparator* paintNeighbours(Mesh* mesh, int pnt);
 	SoSeparator* DrawLines(Mesh* mesh,int source,int targ,int N, int* prev);
 	vector<int> getPath(int* prev, int source, int targ, int N);
