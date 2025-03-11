@@ -230,10 +230,84 @@ void visualizeFarthestPointSampling(int numSamples) {
 	g_viewer->viewAll();
 }
 
+// Function to find the optimal loop order with minimal unwanted intersections
+vector<int> findOptimalLoopOrder(vector<int>& fpsPoints, Mesh* mesh) {
+	// Keep first point fixed and try permutations of others
+	vector<int> bestOrder = {fpsPoints[0], fpsPoints[1], fpsPoints[2], fpsPoints[3]};
+	int minIntersections = INT_MAX;
+	
+	// Store all possible permutations (keeping first point fixed)
+	vector<vector<int>> permutations;
+	vector<int> remaining = {fpsPoints[1], fpsPoints[2], fpsPoints[3]};
+	
+	// Generate all permutations
+	do {
+		vector<int> order = {fpsPoints[0]}; // Keep first point fixed
+		order.insert(order.end(), remaining.begin(), remaining.end());
+		permutations.push_back(order);
+	} while (next_permutation(remaining.begin(), remaining.end()));
+	
+	// Check each permutation for unwanted intersections
+	for (const vector<int>& order : permutations) {
+		// Compute paths between consecutive points (including last to first)
+		vector<vector<int>> loopPaths;
+		for (int i = 0; i < order.size(); i++) {
+			int source = order[i];
+			int target = order[(i + 1) % order.size()]; // Wrap around to first
+			
+			vector<int> path = computeGeodesicPath(source, target);
+			if (!path.empty()) {
+				loopPaths.push_back(path);
+			}
+		}
+		
+		// Count unwanted intersections (shared vertices between non-adjacent paths)
+		int intersections = 0;
+		for (int i = 0; i < loopPaths.size(); i++) {
+			for (int j = i + 2; j < loopPaths.size(); j++) {
+				// Skip adjacent paths (i and i+1)
+				if ((i == 0 && j == loopPaths.size() - 1)) {
+					// First and last are adjacent in the loop
+					continue;
+				}
+				
+				// Check for shared vertices (except FPS points)
+				for (int v1 : loopPaths[i]) {
+					if (find(fpsPoints.begin(), fpsPoints.end(), v1) != fpsPoints.end()) {
+						continue; // Skip FPS points
+					}
+					
+					for (int v2 : loopPaths[j]) {
+						if (v1 == v2) {
+							intersections++;
+							break; // Found one intersection point between these paths
+						}
+					}
+				}
+			}
+		}
+		
+		// Update best order if this has fewer intersections
+		if (intersections < minIntersections) {
+			minIntersections = intersections;
+			bestOrder = order;
+			
+			// If we found a perfect loop (no unwanted intersections), return it immediately
+			if (intersections == 0) {
+				cout << "Found perfect loop with no unwanted intersections!" << endl;
+				return bestOrder;
+			}
+		}
+	}
+	
+	cout << "Best loop order has " << minIntersections << " unwanted intersections." << endl;
+	return bestOrder;
+}
+
 // Function to compute and visualize patches
 void computeAndVisualizePatches() {
 	// Load mesh
-	string meshPath = "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw1src/249.off";
+	string meshPath = "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw1src/348.off";
 	loadNewMesh(meshPath);
 	
 	// Clear previous visualization
@@ -254,92 +328,99 @@ void computeAndVisualizePatches() {
 	
 	int N = g_mesh->verts.size();
 	
-	// Compute all pairs of geodesic paths between FPS points
+	// Find the optimal loop order
+	vector<int> optimalOrder = findOptimalLoopOrder(samples, g_mesh);
+	
+	cout << "Optimal loop order: ";
+	for (int idx : optimalOrder) {
+		cout << idx << " ";
+	}
+	cout << endl;
+	
+	// Use the optimal order for MAP 2 instead of the hardcoded order
+	cout << "Creating MAP 2: Loop paths between FPS points in optimal order..." << endl;
+	
+	// Create a separator for the loop paths
+	SoSeparator* map2Sep = new SoSeparator();
+	SoMaterial* map2Mat = new SoMaterial();
+	map2Mat->diffuseColor.setValue(0, 0, 1); // Blue for loop paths
+	map2Sep->addChild(map2Mat);
+	
+	// Vector to collect path vertices for patch
 	vector<vector<int>> paths;
 	
 	for (int i = 0; i < numFPS; i++) {
-		for (int j = i + 1; j < numFPS; j++) {
-			vector<int> path = computeGeodesicPath(samples[i], samples[j]);
-			if (!path.empty()) {
-				paths.push_back(path);
-				cout << "Computed path from " << samples[i] << " to " << samples[j] 
-					 << " with " << path.size() << " vertices" << endl;
-			}
+		int source = optimalOrder[i];
+		int target = optimalOrder[(i + 1) % numFPS]; // Connect to next in optimal order
+		
+		// First, get path vertices for patch boundary
+		vector<int> path = computeGeodesicPath(source, target);
+		if (!path.empty()) {
+			paths.push_back(path);
+		}
+		
+		// Use findShortestPath correctly - here's the fix:
+		int* prev = g_mesh->findShortestPath(source, N);
+		if (prev) {
+			// Create and add visualization of path
+			map2Sep->addChild(g_painter->DrawLines(g_mesh, source, target, N, prev));
+			delete[] prev;
+			cout << "Added path from " << source << " to " << target << endl;
+		} else {
+			cout << "Failed to compute path from " << source << " to " << target << "!" << endl;
 		}
 	}
 	
-	// Find intersections between paths
-	set<int> intersections;
-	for (size_t i = 0; i < paths.size(); i++) {
-		for (size_t j = i + 1; j < paths.size(); j++) {
-			// Find intersection points
-			for (int v1 : paths[i]) {
-				for (int v2 : paths[j]) {
-					if (v1 == v2 && v1 != samples[0] && v1 != samples[1] 
-							  && v1 != samples[2] && v1 != samples[3]) {
-						intersections.insert(v1);
-						cout << "Found intersection at vertex " << v1 << endl;
-					}
-				}
-			}
-		}
-	}
+	// Add the loop paths separator to the scene
+	g_root->addChild(map2Sep);
 	
-	if (intersections.empty()) {
-		cout << "No intersections found between geodesic paths!" << endl;
-		
-		// Highlight FPS points with distinct larger points
-		SoSeparator* fpsSep = new SoSeparator();
-		for (int i = 0; i < samples.size(); i++) {
-			// Different color for each FPS point
-			float r = (i == 0) ? 1.0f : 0.0f;
-			float g = (i == 1) ? 1.0f : 0.0f;
-			float b = (i == 2) ? 1.0f : 0.0f;
-			
-			if (i == 3) r = g = 1.0f; // Yellow for last point
-			
-			fpsSep->addChild(g_painter->get1PointSep(g_mesh, samples[i], r, g, b, 8.0f, false));
-			cout << "FPS " << i << " is vertex " << samples[i] << endl;
-		}
-		g_root->addChild(fpsSep);
-		
-		// Draw the paths between FPS points
-		SoSeparator* pathsSep = new SoSeparator();
-		SoMaterial* pathsMat = new SoMaterial();
-		pathsMat->diffuseColor.setValue(0, 1, 0); // Green for paths
-		pathsSep->addChild(pathsMat);
-		
-		for (int i = 0; i < numFPS; i++) {
-			for (int j = i + 1; j < numFPS; j++) {
-				int* prev = g_mesh->findShortestPath(samples[i], N);
-				if (prev) {
-					pathsSep->addChild(g_painter->DrawLines(g_mesh, samples[i], samples[j], N, prev));
-					delete[] prev;
-				}
-			}
-		}
-		g_root->addChild(pathsSep);
-		
-		// Update viewer
-		g_viewer->viewAll();
-		return;
-	}
+	// Create patch boundaries using the corner points
+	vector<vector<int>> patchBoundaries;
 	
-	// Choose the first intersection as our geodesic center
-	int geodesicCenter = *intersections.begin();
-	cout << "Using vertex " << geodesicCenter << " as geodesic center" << endl;
+	// If we have 4 valid paths forming a closed loop
+	if (paths.size() == numFPS) {
+		vector<int> quadCorners = optimalOrder;
+		
+		// Make sure the quadrilateral is properly oriented (try to prevent fold-overs)
+		SbVec3f centroid(0, 0, 0);
+		for (int idx : quadCorners) {
+			centroid += SbVec3f(g_mesh->verts[idx]->coords);
+		}
+		centroid /= quadCorners.size();
+		
+		// Calculate vectors from centroid to corners for orientation check
+		vector<SbVec3f> cornerVecs;
+		for (int idx : quadCorners) {
+			SbVec3f vec = SbVec3f(g_mesh->verts[idx]->coords) - centroid;
+			vec.normalize();
+			cornerVecs.push_back(vec);
+		}
+		
+		// Check if we need to reorder based on orientation
+		// (This is a simple heuristic - could be improved)
+		float orientation = (cornerVecs[0].cross(cornerVecs[1])).dot(cornerVecs[2].cross(cornerVecs[3]));
+		if (orientation < 0) {
+			// Swap points 2 and 3 to improve orientation
+			swap(quadCorners[2], quadCorners[3]);
+			cout << "Adjusted corner ordering for better patch orientation" << endl;
+		}
+		
+		patchBoundaries.push_back(quadCorners);
+		
+		// Visualize the interpolated patches
+		SoSeparator* patchesSep = g_painter->visualizePatches(g_mesh, patchBoundaries);
+		g_root->addChild(patchesSep);
+		cout << "Added interpolated patch visualization" << endl;
+	} else {
+		cout << "Warning: Could not create a complete closed loop with 4 paths." << endl;
+		cout << "Found " << paths.size() << " valid paths out of " << numFPS << " needed." << endl;
+	}
 	
 	// MAP 1: Create a separator for the center-to-FPS geodesic paths (star pattern)
 	SoSeparator* map1Sep = new SoSeparator();
 	SoMaterial* map1Mat = new SoMaterial();
 	map1Mat->diffuseColor.setValue(0, 1, 0); // Green for map1 (star) paths
 	map1Sep->addChild(map1Mat);
-	
-	// MAP 2: Create a separator for the FPS-to-FPS geodesic paths (loop with mixed order)
-	SoSeparator* map2Sep = new SoSeparator();
-	SoMaterial* map2Mat = new SoMaterial();
-	map2Mat->diffuseColor.setValue(0, 0, 1); // Blue for map2 (loop) paths
-	map2Sep->addChild(map2Mat);
 	
 	// Collect all vertices in all paths
 	vector<int> allPathVertices;
@@ -350,16 +431,16 @@ void computeAndVisualizePatches() {
 		int target = samples[i];
 		
 		// Compute geodesic path from center to FPS point
-		vector<int> path = computeGeodesicPath(geodesicCenter, target);
+		vector<int> path = computeGeodesicPath(samples[0], target);
 		
 		if (!path.empty()) {
 			// Add path vertices to overall collection
 			allPathVertices.insert(allPathVertices.end(), path.begin(), path.end());
 			
 			// Visualize this path segment
-			int* prev = g_mesh->findShortestPath(geodesicCenter, N);
+			int* prev = g_mesh->findShortestPath(samples[0], N);
 			if (prev) {
-				map1Sep->addChild(g_painter->DrawLines(g_mesh, geodesicCenter, target, N, prev));
+				map1Sep->addChild(g_painter->DrawLines(g_mesh, samples[0], target, N, prev));
 				delete[] prev;
 				cout << "Added MAP 1 path from geodesic center to FPS " << i 
 					 << " with " << path.size() << " vertices" << endl;
@@ -369,38 +450,8 @@ void computeAndVisualizePatches() {
 		}
 	}
 	
-	// MAP 2: Create loop paths between FPS points in a mixed order
-	cout << "Creating MAP 2: Loop paths between FPS points in mixed order..." << endl;
-	// Instead of sequential 0→1→2→3→0, use 0→2→1→3→0 to create a crossing pattern
-	int loopOrder[4] = {0, 2, 1, 3}; // Non-sequential order to create a distinct path
-	
-	for (int i = 0; i < numFPS; i++) {
-		int source = samples[loopOrder[i]];
-		int target = samples[loopOrder[(i + 1) % numFPS]]; // Connect to next in our custom order
-		
-		// Compute geodesic path between FPS points
-		vector<int> path = computeGeodesicPath(source, target);
-		
-		if (!path.empty()) {
-			// Add path vertices to overall collection
-			allPathVertices.insert(allPathVertices.end(), path.begin(), path.end());
-			
-			// Visualize this path segment
-			int* prev = g_mesh->findShortestPath(source, N);
-			if (prev) {
-				map2Sep->addChild(g_painter->DrawLines(g_mesh, source, target, N, prev));
-				delete[] prev;
-				cout << "Added MAP 2 path from FPS " << loopOrder[i] << " to FPS " << loopOrder[(i + 1) % numFPS]
-					 << " with " << path.size() << " vertices" << endl;
-			}
-		} else {
-			cout << "Failed to compute path from " << source << " to " << target << "!" << endl;
-		}
-	}
-	
 	// Add both map separators to scene
 	g_root->addChild(map1Sep);
-	g_root->addChild(map2Sep);
 	
 	// Highlight all vertices along paths with small green points
 	SoSeparator* allPointsSep = new SoSeparator();
@@ -419,7 +470,7 @@ void computeAndVisualizePatches() {
 	SoMaterial* centerMat = new SoMaterial();
 	centerMat->diffuseColor.setValue(1, 0, 1); // Purple for center
 	centerSep->addChild(centerMat);
-	centerSep->addChild(g_painter->get1PointSep(g_mesh, geodesicCenter, 1, 0, 1, 10.0f, false));
+	centerSep->addChild(g_painter->get1PointSep(g_mesh, samples[0], 1, 0, 1, 10.0f, false));
 	g_root->addChild(centerSep);
 	cout << "Highlighted geodesic center (purple)" << endl;
 	
@@ -440,7 +491,7 @@ void computeAndVisualizePatches() {
 	
 	cout << "Complete patch visualization with:" << endl;
 	cout << " - MAP 1: Green star paths from center to FPS points" << endl;
-	cout << " - MAP 2: Blue loop paths between FPS points in mixed order" << endl;
+	cout << " - MAP 2: Blue loop paths between FPS points in optimal order" << endl;
 	cout << " - Total vertices: " << allPathVertices.size() << endl;
 	
 	// Update viewer
