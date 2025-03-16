@@ -51,7 +51,7 @@ SoWinExaminerViewer* g_viewer = nullptr;
 void visualizeGeodesicPath(int source, int target);
 void visualizeFarthestPointSampling(int numSamples);
 void loadNewMesh(const string& meshPath);
-void computeAndVisualizePatches();
+void computeAndVisualizePatches(const string& meshPath);
 
 /**
  * Load a new mesh and prepare it for visualization
@@ -335,10 +335,11 @@ vector<int> findOptimalLoopOrder(vector<int>& fpsPoints, Mesh* mesh) {
  * Compute and visualize two types of patch maps:
  * 1. MAP 1: Star-like paths from geodesic center to FPS points
  * 2. MAP 2: Loop paths between FPS points in optimal order
+ * 
+ * @param meshPath Path to the mesh file (.off format)
  */
-void computeAndVisualizePatches() {
+void computeAndVisualizePatches(const string& meshPath) {
 	// Load mesh
-	string meshPath = "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw1src/249.off";
 	loadNewMesh(meshPath);
 	
 	// Clear previous visualization
@@ -535,9 +536,10 @@ void displayMenu() {
 	cout << "\n=== Mesh Processing Menu ===" << endl;
 	cout << "1. Compute geodesic path between two vertices" << endl;
 	cout << "2. Visualize farthest point sampling" << endl;
-	cout << "3. Compute and visualize patches (using mesh from segeval)" << endl;
-	cout << "4. Exit" << endl;
-	cout << "Enter your choice (1-4): ";
+	cout << "3. Compute and visualize patches (using mesh 249.off)" << endl;
+	cout << "4. Compute and visualize patches (using mesh 348.off)" << endl;
+	cout << "5. Exit" << endl;
+	cout << "Enter your choice (1-5): ";
 }
 
 /**
@@ -617,7 +619,7 @@ DWORD WINAPI ConsoleInputThread(LPVOID lpParam)
 {
 	int choice = 0;
 	
-	while (choice != 4) {
+	while (choice != 5) {  // Update exit condition to 5
 		cin >> choice;
 		
 		switch (choice) {
@@ -641,12 +643,19 @@ DWORD WINAPI ConsoleInputThread(LPVOID lpParam)
 				break;
 			}
 			
-			case 3: { // Patching
-				computeAndVisualizePatches();
+			case 3: { // Patching with 249.off
+				string meshPath = "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw1src/249.off";
+				computeAndVisualizePatches(meshPath);
 				break;
 			}
 			
-			case 4: // Exit
+			case 4: { // Patching with 348.off
+				string meshPath = "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw1src/348.off";
+				computeAndVisualizePatches(meshPath);
+				break;
+			}
+			
+			case 5: // Exit
 				cout << "Exiting program." << endl;
 				SoWin::exitMainLoop(); // Request exit from the main Coin3D loop
 				break;
@@ -656,7 +665,7 @@ DWORD WINAPI ConsoleInputThread(LPVOID lpParam)
 				break;
 		}
 		
-		if (choice != 4) {
+		if (choice != 5) {  // Update condition to 5
 			displayMenu(); // Show the menu again for next input
 		}
 	}
