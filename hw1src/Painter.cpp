@@ -3,6 +3,11 @@
 
 #include "Painter.h"
 
+/**
+ * Create a visualization separator for the entire mesh
+ * @param mesh Pointer to the mesh to visualize
+ * @return SoSeparator containing the mesh visualization
+ */
 SoSeparator* Painter::getShapeSep(Mesh* mesh)
 {
 	SoSeparator* res = new SoSeparator();
@@ -18,10 +23,12 @@ SoSeparator* Painter::getShapeSep(Mesh* mesh)
 	hints->creaseAngle = 3.14;
 	facesSep->addChild(hints);
 	
+	// Add coordinates for all vertices
 	SoCoordinate3* coords = new SoCoordinate3();
 	for (int c = 0; c < mesh->verts.size(); c++)
 		coords->point.set1Value(c, mesh->verts[c]->coords[0], mesh->verts[c]->coords[1], mesh->verts[c]->coords[2]);
 	
+	// Create face set from triangle indices
 	SoIndexedFaceSet* faceSet = new SoIndexedFaceSet();
 	for (int c = 0; c < mesh->tris.size(); c++)
 	{
@@ -35,7 +42,7 @@ SoSeparator* Painter::getShapeSep(Mesh* mesh)
 	facesSep->addChild(faceSet);
 	res->addChild(facesSep);
 
-	// Keep the edges with full opacity if drawThickEdges is true
+	// Optionally add edges with full opacity
 	bool drawThickEdges = true;
 	if (drawThickEdges)
 	{
@@ -43,12 +50,14 @@ SoSeparator* Painter::getShapeSep(Mesh* mesh)
 		SoMaterial* ma = new SoMaterial;
 		ma->diffuseColor.set1Value(0, 0.0f, 0.0f, 1.0f);
 		thickEdgeSep->addChild(ma);
-		SoDrawStyle* sty = new SoDrawStyle;	sty->lineWidth = 1.0f;	thickEdgeSep->addChild(sty);
+		SoDrawStyle* sty = new SoDrawStyle;	
+		sty->lineWidth = 1.0f;	
+		thickEdgeSep->addChild(sty);
 
 		SoIndexedLineSet* ils = new SoIndexedLineSet;
 		SoCoordinate3* co = new SoCoordinate3;
 
-		//assumes no edge in sedges is removed
+		// Create lines for all edges
 		for (unsigned int se = 0; se < mesh->edges.size(); se++)
 		{
 			SbVec3f end1 = mesh->verts[mesh->edges[se]->v1i]->coords + SbVec3f(0.0f, 0.0f, 0.0f),
@@ -57,17 +66,30 @@ SoSeparator* Painter::getShapeSep(Mesh* mesh)
 			co->point.set1Value(2 * se + 1, end2);
 		}
 
+		// Create indices for line set
 		for (unsigned int ci = 0; ci < mesh->edges.size(); ci++)
 		{
-			ils->coordIndex.set1Value(3 * ci, 2 * ci);	ils->coordIndex.set1Value(3 * ci + 1, 2 * ci + 1);
-			ils->coordIndex.set1Value(3 * ci + 2, -1); //end this edge with -1
+			ils->coordIndex.set1Value(3 * ci, 2 * ci);	
+			ils->coordIndex.set1Value(3 * ci + 1, 2 * ci + 1);
+			ils->coordIndex.set1Value(3 * ci + 2, -1); // End this edge with -1
 		}
-		thickEdgeSep->addChild(co);	thickEdgeSep->addChild(ils);
+		thickEdgeSep->addChild(co);	
+		thickEdgeSep->addChild(ils);
 		res->addChild(thickEdgeSep);
 	}
 
 	return res;
 }
+
+/**
+ * Create a visualization of a path between two vertices
+ * @param mesh Pointer to the mesh
+ * @param source Index of source vertex
+ * @param target Index of target vertex
+ * @param N Number of vertices in the mesh
+ * @param prev Array of predecessors from Dijkstra's algorithm
+ * @return SoSeparator containing the path visualization
+ */
 SoSeparator* Painter::DrawLines(Mesh* mesh, int source, int target, int N, int* prev) {
 	SoSeparator* lineSep = new SoSeparator();
 	
@@ -76,7 +98,7 @@ SoSeparator* Painter::DrawLines(Mesh* mesh, int source, int target, int N, int* 
 		return lineSep;  // Return empty separator
 	}
 	
-	// Get the path
+	// Reconstruct the path from prev array
 	vector<int> path;
 	int at = target;
 	while (at != source && at != -1) {
@@ -100,7 +122,7 @@ SoSeparator* Painter::DrawLines(Mesh* mesh, int source, int target, int N, int* 
 		return lineSep;
 	}
 	
-	// Style and material setup
+	// Style and material setup for red path lines
 	SoMaterial* mat = new SoMaterial();
 	mat->diffuseColor.setValue(1, 0, 0); // Red path
 	lineSep->addChild(mat);
@@ -122,7 +144,7 @@ SoSeparator* Painter::DrawLines(Mesh* mesh, int source, int target, int N, int* 
 	}
 	lineSep->addChild(coords);
 	
-	// Create indexed line set
+	// Create indexed line set connecting sequential path points
 	SoIndexedLineSet* lineSet = new SoIndexedLineSet();
 	int coordIndex = 0;
 	for (unsigned int i = 0; i < path.size() - 1; i++) {
@@ -134,7 +156,18 @@ SoSeparator* Painter::DrawLines(Mesh* mesh, int source, int target, int N, int* 
 	lineSep->addChild(lineSet);
 	return lineSep;
 }
-	
+
+/**
+ * Create a visualization of a single vertex as a colored sphere
+ * @param obj Pointer to the mesh
+ * @param pnt Index of vertex to visualize
+ * @param r Red component (0-1)
+ * @param g Green component (0-1)
+ * @param b Blue component (0-1)
+ * @param pointSize Size of the point
+ * @param showNeighbours Whether to also show neighboring vertices
+ * @return SoSeparator containing the point visualization
+ */
 SoSeparator* Painter::get1PointSep(Mesh* obj, int pnt, float r, float g, float b, float pointSize, bool showNeighbours)
 {
 	Mesh* mesh = obj;
@@ -161,17 +194,25 @@ SoSeparator* Painter::get1PointSep(Mesh* obj, int pnt, float r, float g, float b
 	sphere->radius = pointSize * 0.01f; // Scale factor to keep spheres reasonably sized
 	pntSep->addChild(sphere);
 	
+	// Optionally show neighboring vertices
 	if(showNeighbours)
 		pntSep->addChild(paintNeighbours(mesh, pnt));
 
 	return pntSep;
 }
 
-vector<int> Painter::getPath(int* prev,int source,int targ,int N){
-	int u=targ;
+/**
+ * Extract path vertices from predecessor array
+ * @param prev Array of predecessors from Dijkstra's algorithm
+ * @param source Source vertex index
+ * @param targ Target vertex index
+ * @param N Number of vertices in the mesh
+ * @return Vector of vertex indices forming the path
+ */
+vector<int> Painter::getPath(int* prev, int source, int targ, int N) {
+	int u = targ;
 	vector<int> path;
 	if (prev[u] != NULL || u == source) {
-		//printf("in if");
 		while (u != -1) {
 			path.push_back(u);
 			u = prev[u];
@@ -180,45 +221,56 @@ vector<int> Painter::getPath(int* prev,int source,int targ,int N){
 	return path;
 }
 
-/// <summary>
-/// Use this function for debugging, to check if we succesfully found the neighbours of the vertex.
-/// </summary>
-/// <param name="mesh"></param>
-/// <param name="pnt"></param>
-/// <returns></returns>
+/**
+ * Visualize the neighbors of a vertex
+ * Useful for debugging vertex connectivity
+ * @param mesh Pointer to the mesh
+ * @param pnt Index of the vertex whose neighbors should be visualized
+ * @return SoSeparator containing the neighbor visualization
+ */
 SoSeparator* Painter::paintNeighbours(Mesh* mesh, int pnt) {
 	SoSeparator* pntSep = new SoSeparator;
-	//material
+	
+	// Yellow material for neighboring points
 	SoMaterial* mat = new SoMaterial;
 	mat->diffuseColor.setValue(SbColor(1.0f, 1.0f, 0.0f));
 	pntSep->addChild(mat);
+	
+	// Larger point size for visibility
 	SoDrawStyle* style = new SoDrawStyle;
 	style->pointSize = 10.0f;
 	pntSep->addChild(style);
 
-	//shape
+	// Create vertices for each neighbor
 	SoVertexProperty* vp = new SoVertexProperty;
 	for (int i = 0; i < mesh->verts[pnt]->vertList.size(); i++) {
-		//printf("Neighbour %d is %d", i, mesh->verts[pnt]->vertList[i]);
-		vp->vertex.
-			set1Value(i, mesh->verts[mesh->verts[pnt]->vertList[i]]->coords);
+		vp->vertex.set1Value(i, mesh->verts[mesh->verts[pnt]->vertList[i]]->coords);
 	}
+	
+	// Create point set for visualization
 	SoPointSet* pSet = new SoPointSet;
 	pSet->numPoints = mesh->verts[pnt]->vertList.size();
 	pSet->vertexProperty = vp;
 	pntSep->addChild(pSet);
+	
 	return pntSep;
 }
 
+/**
+ * Visualize a set of sampled points on the mesh
+ * @param mesh Pointer to the mesh
+ * @param samples Vector of vertex indices for sampled points
+ * @return SoSeparator containing the sample points visualization
+ */
 SoSeparator* Painter::visualizeSampledPoints(Mesh* mesh, vector<int>& samples) {
     SoSeparator* pointsSep = new SoSeparator();
     
-    // Material for sample points
+    // Material for sample points (green)
     SoMaterial* mat = new SoMaterial();
     mat->diffuseColor.setValue(0, 1, 0); // Green
     pointsSep->addChild(mat);
     
-    // Style for sample points (larger)
+    // Larger point size for better visibility
     SoDrawStyle* style = new SoDrawStyle();
     style->pointSize = 10.0f;
     pointsSep->addChild(style);
@@ -231,7 +283,7 @@ SoSeparator* Painter::visualizeSampledPoints(Mesh* mesh, vector<int>& samples) {
     }
     pointsSep->addChild(coords);
     
-    // Create point set
+    // Create point set for visualization
     SoPointSet* pointSet = new SoPointSet();
     pointSet->numPoints = samples.size();
     pointsSep->addChild(pointSet);
@@ -239,9 +291,17 @@ SoSeparator* Painter::visualizeSampledPoints(Mesh* mesh, vector<int>& samples) {
     return pointsSep;
 }
 
+/**
+ * Create a visualization of patches defined by boundary points
+ * Uses Coons patch interpolation to create smooth patches
+ * @param mesh Pointer to the mesh
+ * @param patchBoundaries Vector of boundaries, each with 4 corner points
+ * @return SoSeparator containing the patches visualization
+ */
 SoSeparator* Painter::visualizePatches(Mesh* mesh, vector<vector<int>>& patchBoundaries) {
     SoSeparator* patchesSep = new SoSeparator();
     
+    // Semitransparent teal material for patches
     SoMaterial* patchMat = new SoMaterial();
     patchMat->diffuseColor.setValue(0.3f, 0.8f, 0.6f);
     patchMat->transparency = 0.2f;
@@ -265,7 +325,7 @@ SoSeparator* Painter::visualizePatches(Mesh* mesh, vector<vector<int>>& patchBou
         int N = mesh->verts.size();
         vector<vector<SbVec3f>> boundaryCurves(4);
         
-        // Get the four boundary curves
+        // Get the four boundary curves using geodesic paths
         vector<int> path01 = computeGeodesicPath(boundary[0], boundary[1], mesh);
         vector<int> path12 = computeGeodesicPath(boundary[1], boundary[2], mesh);
         vector<int> path23 = computeGeodesicPath(boundary[2], boundary[3], mesh);
@@ -327,19 +387,19 @@ SoSeparator* Painter::visualizePatches(Mesh* mesh, vector<vector<int>>& patchBou
             }
         }
         
-        // Set up coordinates
+        // Set up coordinates for the patch
         SoCoordinate3* coords = new SoCoordinate3();
         for (size_t i = 0; i < gridPoints.size(); i++) {
             coords->point.set1Value(i, gridPoints[i]);
         }
         
-        // Set up face set
+        // Set up face set for the patch
         SoIndexedFaceSet* faceSet = new SoIndexedFaceSet();
         for (size_t i = 0; i < gridFaces.size(); i++) {
             faceSet->coordIndex.set1Value(i, gridFaces[i]);
         }
         
-        // Add to separator
+        // Add the patch to the scene
         SoSeparator* patchSep = new SoSeparator();
         patchSep->addChild(coords);
         patchSep->addChild(faceSet);
@@ -349,7 +409,12 @@ SoSeparator* Painter::visualizePatches(Mesh* mesh, vector<vector<int>>& patchBou
     return patchesSep;
 }
 
-// Helper function to interpolate points along a curve
+/**
+ * Helper function to interpolate points along a curve
+ * @param curve Vector of points defining the curve
+ * @param t Parameter value between 0 and 1
+ * @return Interpolated point on the curve
+ */
 SbVec3f Painter::interpolateAlongCurve(const vector<SbVec3f>& curve, float t) {
     if (curve.empty()) return SbVec3f(0, 0, 0);
     if (curve.size() == 1) return curve[0];
@@ -371,7 +436,13 @@ SbVec3f Painter::interpolateAlongCurve(const vector<SbVec3f>& curve, float t) {
     return curve[idx1] * (1-alpha) + curve[idx2] * alpha;
 }
 
-// Helper function to get geodesic path between two vertices
+/**
+ * Helper function to compute geodesic path between two vertices
+ * @param source Source vertex index
+ * @param target Target vertex index
+ * @param mesh Pointer to the mesh
+ * @return Vector of vertex indices forming the path
+ */
 vector<int> Painter::computeGeodesicPath(int source, int target, Mesh* mesh) {
     vector<int> path;
     int N = mesh->verts.size();

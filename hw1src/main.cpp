@@ -32,6 +32,7 @@
 
 using namespace std;
 
+// Forward declarations
 int getRandVertexPoint(Mesh* mesh);
 float getDistance(float* refCoord, float* targetCoord);
 float* Dijkstra(float** M, int src, int targ, int N, int* prev);
@@ -52,7 +53,10 @@ void visualizeFarthestPointSampling(int numSamples);
 void loadNewMesh(const string& meshPath);
 void computeAndVisualizePatches();
 
-// Function to load a new mesh
+/**
+ * Load a new mesh and prepare it for visualization
+ * @param meshPath Path to the mesh file (.off format)
+ */
 void loadNewMesh(const string& meshPath) {
 	// Clear previous visualization
 	while (g_root->getNumChildren() > 0) {
@@ -82,7 +86,12 @@ void loadNewMesh(const string& meshPath) {
 	g_viewer->viewAll();
 }
 
-// Function to compute geodesic path and return the path vertices
+/**
+ * Compute geodesic path between two vertices and return the path vertices
+ * @param source Source vertex index
+ * @param target Target vertex index
+ * @return Vector of vertex indices forming the path
+ */
 vector<int> computeGeodesicPath(int source, int target) {
 	vector<int> path;
 	int N = g_mesh->verts.size();
@@ -116,7 +125,13 @@ vector<int> computeGeodesicPath(int source, int target) {
 	return path;
 }
 
-// Function to detect intersection between two geodesic paths
+/**
+ * Find intersection between two geodesic paths
+ * @param path1 First path as vector of vertex indices
+ * @param path2 Second path as vector of vertex indices
+ * @param intersectionPoint Output parameter for the intersection point
+ * @return True if an intersection exists, false otherwise
+ */
 bool findIntersection(const vector<int>& path1, const vector<int>& path2, int& intersectionPoint) {
 	for (int v1 : path1) {
 		for (int v2 : path2) {
@@ -129,7 +144,11 @@ bool findIntersection(const vector<int>& path1, const vector<int>& path2, int& i
 	return false;
 }
 
-// Function to update the visualization with geodesic path
+/**
+ * Compute and visualize the geodesic path between two vertices
+ * @param source Source vertex index
+ * @param target Target vertex index
+ */
 void visualizeGeodesicPath(int source, int target) {
 	// Clear previous visualization (except base mesh)
 	while (g_root->getNumChildren() > 1) {
@@ -181,7 +200,10 @@ void visualizeGeodesicPath(int source, int target) {
 	g_viewer->viewAll();
 }
 
-// Function to visualize farthest point sampling
+/**
+ * Visualize the farthest point sampling algorithm on the mesh
+ * @param numSamples Number of sample points to compute
+ */
 void visualizeFarthestPointSampling(int numSamples) {
 	// Clear previous visualization (except base mesh)
 	while (g_root->getNumChildren() > 1) {
@@ -212,7 +234,7 @@ void visualizeFarthestPointSampling(int numSamples) {
 	}
 	g_root->addChild(pointsSep);
 	
-	// Draw paths between sample points (optional)
+	// Draw paths between sample points
 	for (size_t i = 0; i < samples.size(); i++) {
 		for (size_t j = i + 1; j < samples.size(); j++) {
 			int source = samples[i];
@@ -230,7 +252,12 @@ void visualizeFarthestPointSampling(int numSamples) {
 	g_viewer->viewAll();
 }
 
-// Function to find the optimal loop order with minimal unwanted intersections
+/**
+ * Find the optimal order for vertices to form a loop with minimal unwanted intersections
+ * @param fpsPoints Vector of farthest point sampling vertices
+ * @param mesh Pointer to the mesh
+ * @return Vector of vertices in optimal order
+ */
 vector<int> findOptimalLoopOrder(vector<int>& fpsPoints, Mesh* mesh) {
 	// Keep first point fixed and try permutations of others
 	vector<int> bestOrder = {fpsPoints[0], fpsPoints[1], fpsPoints[2], fpsPoints[3]};
@@ -304,7 +331,11 @@ vector<int> findOptimalLoopOrder(vector<int>& fpsPoints, Mesh* mesh) {
 	return bestOrder;
 }
 
-// Function to compute and visualize patches
+/**
+ * Compute and visualize two types of patch maps:
+ * 1. MAP 1: Star-like paths from geodesic center to FPS points
+ * 2. MAP 2: Loop paths between FPS points in optimal order
+ */
 void computeAndVisualizePatches() {
 	// Load mesh
 	string meshPath = "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw1src/249.off";
@@ -359,7 +390,7 @@ void computeAndVisualizePatches() {
 			paths.push_back(path);
 		}
 		
-		// Use findShortestPath correctly - here's the fix:
+		// Find shortest path and visualize
 		int* prev = g_mesh->findShortestPath(source, N);
 		if (prev) {
 			// Create and add visualization of path
@@ -397,7 +428,6 @@ void computeAndVisualizePatches() {
 		}
 		
 		// Check if we need to reorder based on orientation
-		// (This is a simple heuristic - could be improved)
 		float orientation = (cornerVecs[0].cross(cornerVecs[1])).dot(cornerVecs[2].cross(cornerVecs[3]));
 		if (orientation < 0) {
 			// Swap points 2 and 3 to improve orientation
@@ -498,7 +528,9 @@ void computeAndVisualizePatches() {
 	g_viewer->viewAll();
 }
 
-// Function to display the menu
+/**
+ * Display the application menu
+ */
 void displayMenu() {
 	cout << "\n=== Mesh Processing Menu ===" << endl;
 	cout << "1. Compute geodesic path between two vertices" << endl;
@@ -508,6 +540,9 @@ void displayMenu() {
 	cout << "Enter your choice (1-4): ";
 }
 
+/**
+ * Main application entry point
+ */
 int main(int, char** argv)
 {
 	srand(time(NULL));
@@ -574,7 +609,10 @@ int main(int, char** argv)
 	return 0;
 }
 
-// Console Input Thread Function
+/**
+ * Thread function to handle console input
+ * Runs separately from the main rendering thread
+ */
 DWORD WINAPI ConsoleInputThread(LPVOID lpParam) 
 {
 	int choice = 0;
@@ -626,9 +664,15 @@ DWORD WINAPI ConsoleInputThread(LPVOID lpParam)
 	return 0;
 }
 
+/**
+ * Find the vertex with the minimum distance that hasn't been marked yet
+ * @param dist Array of distances
+ * @param marked Array indicating whether vertices have been processed
+ * @param N Number of vertices
+ * @return Index of the unprocessed vertex with minimum distance
+ */
 int minDistance(float* dist, bool* marked, int N)
 {
-	// Initialize min value
 	float min = INT_MAX, min_index;
 
 	for (int v = 0; v < N; v++)
@@ -638,18 +682,26 @@ int minDistance(float* dist, bool* marked, int N)
 	return min_index;
 }
 
-//Dijkstra algorithm
-float* Dijkstra(float** M, int src,int targ, int N, int* prev )
+/**
+ * Dijkstra's algorithm to find shortest paths in a graph
+ * @param M Adjacency matrix with edge weights
+ * @param src Source vertex index
+ * @param targ Target vertex index
+ * @param N Number of vertices
+ * @param prev Output array to store predecessors
+ * @return Array of distances from source to all vertices
+ */
+float* Dijkstra(float** M, int src, int targ, int N, int* prev)
 {
 	float* dist = new float[N];
 	bool* marked = new bool[N];
 	for (int i = 0; i < N; i++)
 	{
-		prev[i] = -1; //source node
-		dist[i] = FLT_MAX;
-		marked[i] = false;
+		prev[i] = -1; // Initialize predecessor
+		dist[i] = FLT_MAX; // Initialize distance to infinity
+		marked[i] = false; // Initialize all vertices as unprocessed
 	}
-	dist[src] = 0;
+	dist[src] = 0; // Distance from source to itself is 0
 
 	for (int count = 0; count < N - 1; count++)
 	{
@@ -657,6 +709,7 @@ float* Dijkstra(float** M, int src,int targ, int N, int* prev )
 
 		marked[u] = true;
 
+		// Update distances to neighbors
 		for (int v = 0; v < N; v++) {
 			if (!marked[v] && M[u][v] && (dist[u] + M[u][v] < dist[v]))
 			{
@@ -669,21 +722,27 @@ float* Dijkstra(float** M, int src,int targ, int N, int* prev )
 	return dist;
 }
 
+/**
+ * Get a random vertex from the mesh
+ * @param mesh Pointer to the mesh
+ * @return Random vertex index
+ */
 int getRandVertexPoint(Mesh* mesh) {
-
 	int randV1 = rand() % (mesh->verts.size());
 	return randV1;
 }
 
-//returns distance between two 3D points
+/**
+ * Calculate Euclidean distance between two 3D points
+ * @param refCoord First point coordinates
+ * @param targetCoord Second point coordinates
+ * @return Euclidean distance
+ */
 float getDistance(float* refCoord, float* targetCoord) {
-	
 	float distance = (
 		pow(refCoord[0] - targetCoord[0], 2) +
 		pow(refCoord[1] - targetCoord[1], 2) +
 		pow(refCoord[2] - targetCoord[2], 2));
 
 	return sqrt(distance);
-
-
 }
