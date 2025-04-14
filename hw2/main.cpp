@@ -1,3 +1,5 @@
+#include "pch.h"  // Include precompiled header first
+
 #include <stdio.h>
 #include <cstdlib>
 #include <time.h>
@@ -5,9 +7,19 @@
 #include <cfloat>
 #include <iostream>
 #include <string>
-#include <windows.h>
 #include <vector>
 #include <algorithm>
+#include <set>
+#include <queue>
+
+// Standard C++ headers and Eigen headers BEFORE Windows.h and Coin3D headers
+#include <Eigen/Dense>
+
+// Windows headers with macro protection
+#define NOMINMAX
+#include <windows.h>
+
+// Coin3D/SoWin headers
 #include <Inventor/Win/SoWin.h>
 #include <Inventor/Win/viewers/SoWinExaminerViewer.h>
 #include <Inventor/nodes/SoSeparator.h>
@@ -23,13 +35,12 @@
 #include <Inventor/actions/SoRayPickAction.h>
 #include <Inventor/actions/SoHandleEventAction.h>
 #include <Inventor/SbVec3f.h>
-#include "Mesh.h"
-#include "Painter.h"
-#include <set>
-#include <queue>
 #include <Inventor/nodes/SoIndexedFaceSet.h>
 #include <Inventor/nodes/SoPointSet.h>
-#include <Eigen/Dense>
+
+// Project headers
+#include "Mesh.h"
+#include "Painter.h"
 #include "helpers.h"
 
 using namespace std;

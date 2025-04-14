@@ -1,7 +1,15 @@
-#include <cstdio>
+#include "pch.h"  // Include precompiled header first
 
+#include <stdio.h>
+#include <iostream>
+#include <fstream>
+#include <string>
+
+// Project headers
 #include "Mesh.h"
+#include "helpers.h"
 
+using namespace std;
 /**
  * Load a mesh from an OFF file
  * @param name Path to the .off file

@@ -16,7 +16,7 @@ endif()
 
 # Set the path to the Coin3D include and lib directory.
 include_directories("C:/Users/cagopa/Desktop/Digital-Geometry-Processing/Coin3D/include")
-include_directories("C:/Users/cagopa/Desktop/Digital-Geometry-Processing/eigen-3.4.0")
+include_directories("C:/Users/cagopa/Desktop/Digital-Geometry-Processing/eigen-install/include/eigen3")
 
 # List your source files.
 set(SOURCES

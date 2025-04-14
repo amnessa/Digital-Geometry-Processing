@@ -2,5 +2,6 @@ Coin3D
 build
 eigen-3.4.0
 libigl
+eigen-install
 
 MeshsegBenchmark-1.0-full.zip

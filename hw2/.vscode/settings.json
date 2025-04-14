@@ -61,6 +61,8 @@
         "chrono": "cpp",
         "random": "cpp",
         "semaphore": "cpp",
-        "valarray": "cpp"
+        "valarray": "cpp",
+        "sparse": "cpp",
+        "sparsecholesky": "cpp"
     }
 }

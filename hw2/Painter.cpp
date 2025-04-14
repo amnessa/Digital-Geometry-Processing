@@ -1,7 +1,37 @@
-#include <stdint.h>
-#include <iostream>
+#include "pch.h"  // Include precompiled header first
 
+#include <stdio.h>
+#include <iostream>
+#include <vector>
+#include <algorithm>
+#include <cfloat>
+#include <cmath>
+
+// Standard C++ headers and Eigen headers BEFORE Windows.h and Coin3D headers
+#include <Eigen/Dense>
+#include <Eigen/Sparse>
+
+// Windows headers with macro protection
+#define NOMINMAX
+#include <windows.h>
+
+// Coin3D/SoWin headers
+#include <Inventor/nodes/SoSeparator.h>
+#include <Inventor/nodes/SoMaterial.h>
+#include <Inventor/nodes/SoCoordinate3.h>
+#include <Inventor/nodes/SoLineSet.h>
+#include <Inventor/nodes/SoPointSet.h>
+#include <Inventor/nodes/SoDrawStyle.h>
+#include <Inventor/nodes/SoSphere.h>
+#include <Inventor/nodes/SoTranslation.h>
+#include <Inventor/nodes/SoShapeHints.h>
+#include <Inventor/SbVec3f.h>
+
+// Project headers
 #include "Painter.h"
+#include "helpers.h"
+
+using namespace std;
 
 /**
  * Create a visualization separator for the entire mesh

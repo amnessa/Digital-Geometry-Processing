@@ -1,13 +1,32 @@
-#include "helpers.h"
-#include "Painter.h"
+#include <stdio.h>
+#include <iostream>
+#include <vector>
+#include <algorithm>
+#include <cfloat>
 
-// Include Inventor headers
+// Standard C++ headers and Eigen headers BEFORE Windows.h and Coin3D headers
+#include <Eigen/Dense>
+#include <Eigen/Sparse>
+
+// Windows headers with macro protection
+#define NOMINMAX
+#include <windows.h>
+
+// Coin3D/SoWin headers
 #include <Inventor/nodes/SoSeparator.h>
 #include <Inventor/nodes/SoMaterial.h>
 #include <Inventor/nodes/SoCoordinate3.h>
-#include <Inventor/nodes/SoIndexedFaceSet.h>
+#include <Inventor/nodes/SoPointSet.h>
+#include <Inventor/nodes/SoFaceSet.h>
+#include <Inventor/nodes/SoDrawStyle.h>
+#include <Inventor/SbVec3f.h>
 
-#include <algorithm>
+// Project headers
+#include "Mesh.h"
+#include "Painter.h"
+#include "helpers.h"
+
+using namespace std;
 
 // PairwiseHarmonics private methods implementation
 
