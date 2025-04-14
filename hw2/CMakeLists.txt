@@ -2,11 +2,17 @@ cmake_minimum_required(VERSION 3.10)
 project(Assignment2)
 
 # Use C++11 (or later)
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Define that we are using the DLL version of Coin3D and SoWin.
 add_definitions(-DCOIN_DLL -DSOWIN_DLL)
+
+# Add preprocessor definitions to fix Eigen compatibility issues with VS2022
+if(MSVC)
+    add_definitions(-DNOMINMAX)
+    add_definitions(-DEIGEN_STRONG_INLINE=inline)
+endif()
 
 # Set the path to the Coin3D include and lib directory.
 include_directories("C:/Users/cagopa/Desktop/Digital-Geometry-Processing/Coin3D/include")
@@ -17,6 +23,7 @@ set(SOURCES
     "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw2/main.cpp"
     "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw2/Mesh.cpp"
     "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw2/Painter.cpp"
+    "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw2/helpers.cpp"
 )
 
 # Create the executable target.

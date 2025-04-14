@@ -30,6 +30,7 @@
 #include <Inventor/nodes/SoIndexedFaceSet.h>
 #include <Inventor/nodes/SoPointSet.h>
 #include <Eigen/Dense>
+#include "helpers.h"
 
 using namespace std;
 
@@ -53,6 +54,7 @@ void visualizeGeodesicPath(int source, int target);
 void visualizeFarthestPointSampling(int numSamples);
 void loadNewMesh(const string& meshPath);
 void computeAndVisualizePatches(const string& meshPath);
+void testPairwiseHarmonics();
 
 /**
  * Load a new mesh and prepare it for visualization
@@ -531,16 +533,56 @@ void computeAndVisualizePatches(const string& meshPath) {
 }
 
 /**
+ * Test and visualize pairwise harmonic functions for intrinsic symmetry analysis
+ * Allows the user to select two vertices and visualizes the resulting harmonic field
+ */
+void testPairwiseHarmonics() {
+    // Clear previous visualization (except base mesh)
+    while (g_root->getNumChildren() > 1) {
+        g_root->removeChild(1);
+    }
+    
+    int nVerts = g_mesh->verts.size();
+    
+    // Ask user for two vertices to compute the pairwise harmonic between
+    int p_idx, q_idx;
+    cout << "Enter first vertex index (p) - value 0 (0-" << nVerts - 1 << "): ";
+    cin >> p_idx;
+    cout << "Enter second vertex index (q) - value 1 (0-" << nVerts - 1 << "): ";
+    cin >> q_idx;
+    
+    // Validate input
+    if (p_idx < 0 || p_idx >= nVerts || q_idx < 0 || q_idx >= nVerts || p_idx == q_idx) {
+        cout << "Error: Invalid vertex indices or same vertex selected!" << endl;
+        return;
+    }
+    
+    cout << "Computing pairwise harmonic function between vertices " << p_idx << " and " << q_idx << "..." << endl;
+    
+    // Compute and visualize the pairwise harmonic
+    SoSeparator* harmonicVisualization = testPairwiseHarmonic(g_mesh, p_idx, q_idx, g_painter);
+    g_root->addChild(harmonicVisualization);
+    
+    cout << "Pairwise harmonic visualization complete." << endl;
+    cout << "Blue areas are close to vertex " << p_idx << " (value 0)" << endl;
+    cout << "Red areas are close to vertex " << q_idx << " (value 1)" << endl;
+    
+    // Update viewer
+    g_viewer->viewAll();
+}
+
+/**
  * Display the application menu
  */
 void displayMenu() {
-	cout << "\n=== Mesh Processing Menu ===" << endl;
-	cout << "1. Compute geodesic path between two vertices" << endl;
-	cout << "2. Visualize farthest point sampling" << endl;
-	cout << "3. Compute and visualize patches (using mesh 249.off)" << endl;
-	cout << "4. Compute and visualize patches (using mesh 348.off)" << endl;
-	cout << "5. Exit" << endl;
-	cout << "Enter your choice (1-5): ";
+    cout << "\n=== Mesh Processing Menu ===" << endl;
+    cout << "1. Compute geodesic path between two vertices" << endl;
+    cout << "2. Visualize farthest point sampling" << endl;
+    cout << "3. Compute and visualize patches (using mesh 249.off)" << endl;
+    cout << "4. Compute and visualize patches (using mesh 348.off)" << endl;
+    cout << "5. Test pairwise harmonics for intrinsic symmetry (Phase 1)" << endl;
+    cout << "6. Exit" << endl;
+    cout << "Enter your choice (1-6): ";
 }
 
 /**
@@ -618,60 +660,65 @@ int main(int, char** argv)
  */
 DWORD WINAPI ConsoleInputThread(LPVOID lpParam) 
 {
-	int choice = 0;
-	
-	while (choice != 5) {  // Update exit condition to 5
-		cin >> choice;
-		
-		switch (choice) {
-			case 1: { // Geodesic path
-				int source, target;
-				cout << "Enter source vertex (0-" << g_mesh->verts.size() - 1 << "): ";
-				cin >> source;
-				cout << "Enter target vertex (0-" << g_mesh->verts.size() - 1 << "): ";
-				cin >> target;
-				
-				visualizeGeodesicPath(source, target);
-				break;
-			}
-			
-			case 2: { // Farthest point sampling
-				int numSamples;
-				cout << "Enter number of samples (2-" << g_mesh->verts.size() << "): ";
-				cin >> numSamples;
-				
-				visualizeFarthestPointSampling(numSamples);
-				break;
-			}
-			
-			case 3: { // Patching with 249.off
-				string meshPath = "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw1src/249.off";
-				computeAndVisualizePatches(meshPath);
-				break;
-			}
-			
-			case 4: { // Patching with 348.off
-				string meshPath = "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw1src/348.off";
-				computeAndVisualizePatches(meshPath);
-				break;
-			}
-			
-			case 5: // Exit
-				cout << "Exiting program." << endl;
-				SoWin::exitMainLoop(); // Request exit from the main Coin3D loop
-				break;
-				
-			default:
-				cout << "Invalid choice. Please try again." << endl;
-				break;
-		}
-		
-		if (choice != 5) {  // Update condition to 5
-			displayMenu(); // Show the menu again for next input
-		}
-	}
-	
-	return 0;
+    int choice = 0;
+    
+    while (choice != 6) {  // Update exit condition to 6
+        cin >> choice;
+        
+        switch (choice) {
+            case 1: { // Geodesic path
+                int source, target;
+                cout << "Enter source vertex (0-" << g_mesh->verts.size() - 1 << "): ";
+                cin >> source;
+                cout << "Enter target vertex (0-" << g_mesh->verts.size() - 1 << "): ";
+                cin >> target;
+                
+                visualizeGeodesicPath(source, target);
+                break;
+            }
+            
+            case 2: { // Farthest point sampling
+                int numSamples;
+                cout << "Enter number of samples (2-" << g_mesh->verts.size() << "): ";
+                cin >> numSamples;
+                
+                visualizeFarthestPointSampling(numSamples);
+                break;
+            }
+            
+            case 3: { // Patching with 249.off
+                string meshPath = "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw1src/249.off";
+                computeAndVisualizePatches(meshPath);
+                break;
+            }
+            
+            case 4: { // Patching with 348.off
+                string meshPath = "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw1src/348.off";
+                computeAndVisualizePatches(meshPath);
+                break;
+            }
+            
+            case 5: { // Test pairwise harmonics
+                testPairwiseHarmonics();
+                break;
+            }
+            
+            case 6: // Exit
+                cout << "Exiting program." << endl;
+                SoWin::exitMainLoop(); // Request exit from the main Coin3D loop
+                break;
+                
+            default:
+                cout << "Invalid choice. Please try again." << endl;
+                break;
+        }
+        
+        if (choice != 6) {  // Update condition to 6
+            displayMenu(); // Show the menu again for next input
+        }
+    }
+    
+    return 0;
 }
 
 /**

@@ -57,6 +57,10 @@
         "xtr1common": "cpp",
         "xtree": "cpp",
         "xutility": "cpp",
-        "dense": "cpp"
+        "dense": "cpp",
+        "chrono": "cpp",
+        "random": "cpp",
+        "semaphore": "cpp",
+        "valarray": "cpp"
     }
 }
