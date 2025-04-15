@@ -82,6 +82,26 @@ public:
      * @return SoSeparator containing the visualization
      */
     SoSeparator* visualizeHarmonicField(const Eigen::VectorXd& field, Painter* painter);
+
+    /**
+     * Computes the total length of the iso-curve for a given value in the harmonic field.
+     * Uses a simplified approach by summing segment lengths within triangles.
+     * @param field The computed harmonic field (vector of values per vertex).
+     * @param isoValue The target value for the iso-curve (between 0 and 1). 
+     * @return The total length of the iso-curve segments.
+     */
+    double computeIsoCurveLength(const Eigen::VectorXd& field, double isoValue);
+
+    /**
+     * Computes the R descriptor (perimeter distribution) for a given harmonic field.
+     * @param field The computed harmonic field.
+     * @param numSamplesK The number of iso-curves to sample for the descriptor.
+     * @return An Eigen::VectorXd of size numSamplesK containing the lengths of the sampled iso-curves.
+     */
+    Eigen::VectorXd computeRDescriptor(const Eigen::VectorXd& field, int numSamplesK);
+
+    // Placeholder for D descriptor - requires geodesic distance implementation/access
+    // Eigen::VectorXd computeDDescriptor(int vertex_p_idx, int vertex_q_idx, const Eigen::VectorXd& field, int numSamplesK);
 };
 
 /**

@@ -71,7 +71,8 @@ double PairwiseHarmonics::computeTriangleArea(const Eigen::Vector3d& v1,
 
 double PairwiseHarmonics::computeVoronoiArea(int vertexIdx) {
     double area = 0.0;
-    Eigen::Vector3d p(mesh->verts[vertexIdx]->coords);
+    const SbVec3f& p_coords = mesh->verts[vertexIdx]->coords;
+    Eigen::Vector3d p(p_coords[0], p_coords[1], p_coords[2]); // Initialize with components
     
     // Iterate through all triangles containing this vertex
     for (int triIdx : mesh->verts[vertexIdx]->triList) {
@@ -94,11 +95,14 @@ double PairwiseHarmonics::computeVoronoiArea(int vertexIdx) {
             std::swap(v1i, v3i);
         }
         
-        // Get the coordinates of all three vertices
-        Eigen::Vector3d v1(mesh->verts[v1i]->coords);
-        Eigen::Vector3d v2(mesh->verts[v2i]->coords);
-        Eigen::Vector3d v3(mesh->verts[v3i]->coords);
-        
+        const SbVec3f& v1_coords = mesh->verts[v1i]->coords;
+        const SbVec3f& v2_coords = mesh->verts[v2i]->coords;
+        const SbVec3f& v3_coords = mesh->verts[v3i]->coords;
+        Eigen::Vector3d v1(v1_coords[0], v1_coords[1], v1_coords[2]);
+        Eigen::Vector3d v2(v2_coords[0], v2_coords[1], v2_coords[2]);
+        Eigen::Vector3d v3(v3_coords[0], v3_coords[1], v3_coords[2]);
+
+
         // Compute edges
         Eigen::Vector3d e1 = v2 - v1; // edge from v1 to v2
         Eigen::Vector3d e2 = v3 - v1; // edge from v1 to v3
@@ -196,9 +200,12 @@ bool PairwiseHarmonics::computeCotangentLaplacian() {
             }
             
             // Get coordinates of vertices
-            Eigen::Vector3d vi(mesh->verts[i]->coords);
-            Eigen::Vector3d vj(mesh->verts[j]->coords);
-            Eigen::Vector3d vk(mesh->verts[k]->coords);
+            const SbVec3f& vi_coords = mesh->verts[i]->coords;
+            const SbVec3f& vj_coords = mesh->verts[j]->coords;
+            const SbVec3f& vk_coords = mesh->verts[k]->coords;
+            Eigen::Vector3d vi(vi_coords[0], vi_coords[1], vi_coords[2]);
+            Eigen::Vector3d vj(vj_coords[0], vj_coords[1], vj_coords[2]);
+            Eigen::Vector3d vk(vk_coords[0], vk_coords[1], vk_coords[2]);
             
             // Compute vectors
             Eigen::Vector3d vecA = vi - vk;
@@ -334,34 +341,17 @@ Eigen::VectorXd PairwiseHarmonics::computePairwiseHarmonic(int vertex_p_idx, int
     // Ensure the matrix is in a consistent state after modifications
     A.prune(1e-10); // Remove extremely small values (helps with numerical stability)
     
-    // Solve the system Af = b using LDLT decomposition (stable for symmetric matrices)
-    Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> solver;
+    // Solve the system Af = b using SparseLU 
+    Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
     
-    // Set solver parameters for better numerical stability
-    solver.setShift(1e-10); // Add a small shift to diagonal if needed for stability
     
     // Compute the decomposition
     solver.compute(A);
     
     if (solver.info() != Eigen::Success) {
-        std::cerr << "Failed to decompose the Laplacian matrix!" << std::endl;
-        // Try a more robust solver as fallback
-        Eigen::SparseLU<Eigen::SparseMatrix<double>> luSolver;
-        luSolver.compute(A);
-        
-        if (luSolver.info() != Eigen::Success) {
-            return Eigen::VectorXd();
-        }
-        
-        // Solve with LU decomposition instead
-        Eigen::VectorXd f = luSolver.solve(b);
-        
-        if (luSolver.info() != Eigen::Success) {
-            std::cerr << "Failed to solve the linear system with fallback solver!" << std::endl;
-            return Eigen::VectorXd();
-        }
-        
-        return f;
+        std::cerr << "Failed to decompose the Laplacian matrix with SparseLU!" << std::endl;
+        return Eigen::VectorXd(); // Return empty vector on failure
+
     }
     
     // Solve the system with LDLT
@@ -374,12 +364,13 @@ Eigen::VectorXd PairwiseHarmonics::computePairwiseHarmonic(int vertex_p_idx, int
     
     // Verify boundary conditions
     if (std::abs(f(vertex_p_idx)) > 1e-6 || std::abs(f(vertex_q_idx) - 1.0) > 1e-6) {
-        std::cerr << "Warning: Boundary conditions not satisfied precisely!" << std::endl;
+        // This warning should ideally disappear after switching to SparseLU
+        std::cerr << "Warning: Boundary conditions still not satisfied precisely after LU solve!" << std::endl;
         std::cerr << "f(" << vertex_p_idx << ") = " << f(vertex_p_idx) << " (should be 0)" << std::endl;
         std::cerr << "f(" << vertex_q_idx << ") = " << f(vertex_q_idx) << " (should be 1)" << std::endl;
-        // Force boundary conditions to be exact
-        f(vertex_p_idx) = 0.0;
-        f(vertex_q_idx) = 1.0;
+        // *not* forcing the values if LU still fails, to better diagnose
+        // f(vertex_p_idx) = 0.0; 
+        // f(vertex_q_idx) = 1.0;
     }
     
     return f;
@@ -395,6 +386,7 @@ SoSeparator* PairwiseHarmonics::visualizeHarmonicField(const Eigen::VectorXd& fi
     // Create coordinates for all vertices
     SoCoordinate3* coords = new SoCoordinate3();
     for (size_t i = 0; i < mesh->verts.size(); i++) {
+        // we use SbVec3f to match Coin3D's SoCoordinate3
         coords->point.set1Value(i, mesh->verts[i]->coords);
     }
     sep->addChild(coords);
@@ -422,9 +414,9 @@ SoSeparator* PairwiseHarmonics::visualizeHarmonicField(const Eigen::VectorXd& fi
         avgValue /= 3.0;
         
         // Map value from [0,1] to color (blue to red rainbow)
-        float r = avgValue;
+        float r = static_cast<float>(avgValue);
         float g = 0.0f;
-        float b = 1.0f - avgValue;
+        float b = static_cast<float>(1.0 - avgValue);
         
         // Add color to material
         mat->diffuseColor.set1Value(i, r, g, b);
@@ -434,6 +426,80 @@ SoSeparator* PairwiseHarmonics::visualizeHarmonicField(const Eigen::VectorXd& fi
     sep->addChild(faceSet);
     
     return sep;
+}
+
+double PairwiseHarmonics::computeIsoCurveLength(const Eigen::VectorXd& field, double isoValue){
+    double totalLength = 0.0;
+
+    // Iterate through each triangle
+    for (const auto& tri : mesh->tris){
+        int v1i = tri->v1i;
+        int v2i = tri->v2i;
+        int v3i = tri->v3i;
+
+        double val1 = field(v1i);
+        double val2 = field(v2i);
+        double val3 = field(v3i);
+
+        const SbVec3f& p1_coords = mesh->verts[v1i]->coords;
+        const SbVec3f& p2_coords = mesh->verts[v2i]->coords;
+        const SbVec3f& p3_coords = mesh->verts[v3i]->coords;
+
+        Eigen::Vector3d p1(p1_coords[0], p1_coords[1], p1_coords[2]);
+        Eigen::Vector3d p2(p2_coords[0], p2_coords[1], p2_coords[2]);
+        Eigen::Vector3d p3(p3_coords[0], p3_coords[1], p3_coords[2]);
+
+        std::vector<Eigen::Vector3d> intersectionPoints;
+
+        // Check edge 1-2
+
+        if((val1 < isoValue && val2 > isoValue) || (val1 > isoValue && val2 < isoValue)){
+            if(std::abs(val1-val2) > 1e-9){ // Avoid division by zero
+                double t = (isoValue - val1) / (val2 - val1);
+                intersectionPoints.push_back(p1 + t * (p2 - p1));
+                
+            }
+        }
+
+        // Check edge 2-3
+        if ((val2 < isoValue && val3 > isoValue) || (val2 > isoValue && val3 < isoValue)) {
+            if (std::abs(val2 - val3) > 1e-9) {
+               double t = (isoValue - val2) / (val3 - val2);
+               intersectionPoints.push_back(p2 + t * (p3 - p2));
+           }
+       }
+       // Check edge 3-1
+       if ((val3 < isoValue && val1 > isoValue) || (val3 > isoValue && val1 < isoValue)) {
+            if (std::abs(val3 - val1) > 1e-9) {
+               double t = (isoValue - val3) / (p1 - p3).norm(); // Corrected interpolation
+               intersectionPoints.push_back(p3 + t * (p1 - p3));
+           }
+        }
+        
+    
+        // If exactly two intersection points are found in this triangle, add the segment length
+        if (intersectionPoints.size() == 2) {
+            totalLength += (intersectionPoints[0] - intersectionPoints[1]).norm();
+        
+        }
+        // Handle cases with more intersections if necessary (e.g., iso-value passes through a vertex)
+        // For simplicity, we only handle the standard case of crossing two edges here.
+
+    }
+    return totalLength;
+}
+
+
+Eigen::VectorXd PairwiseHarmonics::computeRDescriptor(const Eigen::VectorXd& field, int numSamplesK) {
+    Eigen::VectorXd R(numSamplesK);
+
+    for (int k = 0; k<numSamplesK; ++k){
+        // Sample iso-value uniformly from (0, 1)
+        double isoValue = static_cast<double>(k +1) / (numSamplesK + 1);
+        R(k) = computeIsoCurveLength(field, isoValue);
+    }
+    
+    return R;
 }
 
 // Free function implementation
