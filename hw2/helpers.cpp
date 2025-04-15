@@ -502,6 +502,116 @@ Eigen::VectorXd PairwiseHarmonics::computeRDescriptor(const Eigen::VectorXd& fie
     return R;
 }
 
+Eigen::VectorXd PairwiseHarmonics::computeDDescriptor(int vertex_p_idx, int vertex_q_idx, const Eigen::VectorXd& field, int numSamplesK) {
+ 
+    Eigen::VectorXd D(numSamplesK);
+    D.setZero(); // Initialize descriptor to zeros
+    int N = mesh->verts.size();
+
+    // --- Precompute Geodesic Distances ---
+    std::cout << "Precomputing geodesic distances from p=" << vertex_p_idx << "..." << std::endl;
+    int numVerts_p;
+    float* dist_p_raw = mesh->computeGeodesicDistances(vertex_p_idx, numVerts_p);
+    if (!dist_p_raw || numVerts_p != N) {
+        std::cerr << "Error computing distances from p!" << std::endl;
+        if (dist_p_raw) delete[] dist_p_raw;
+        return D; // Retrun zero vector on error
+
+    }
+
+    // Convert to Eigen::VectorXd for easier access (optional, but convenient)
+    Eigen::VectorXd dist_p(N);
+    for(int i=0;i<N;++i) dist_p(i) = (dist_p_raw[i] == FLT_MAX) ? std::numeric_limits<double>::infinity() : static_cast<double>(dist_p_raw[i]);
+
+
+    std::cout << " Precomputing geodesic distance from q=" << vertex_q_idx << "..." << std::endl;
+    int numVerts_q;
+    float* dist_q_raw = mesh->computeGeodesicDistances(vertex_q_idx, numVerts_q);
+    if (!dist_q_raw || numVerts_q != N) {
+        std::cerr << "Error computing distances from q!" << std::endl;
+        if (dist_q_raw) delete[] dist_q_raw;
+        return D; // Return zero vector on error
+    }
+    Eigen::VectorXd dist_q(N);
+    for(int i=0;i<N;++i) dist_q(i) = (dist_q_raw[i] == FLT_MAX) ? std::numeric_limits<double>::infinity() : static_cast<double>(dist_q_raw[i]);
+
+    std::cout << " Geodesic distances precomputed." << std::endl;
+
+    // --- End Precompute Geodesic Distances ---
+
+    for (int k = 0; k< numSamplesK; ++k){
+        double isoValue = static_cast<double>(k + 1) / (numSamplesK + 1);
+        double totalDistanceSum = 0.0;
+        int intersectionCount = 0;
+
+        // Iterate through each triangle to find intersections for this isoValue
+        for (const auto& tri: mesh -> tris){
+            int v1i = tri->v1i;
+            int v2i = tri->v2i;
+            int v3i = tri->v3i;
+
+            double val1 = field(v1i);
+            double val2 = field(v2i);
+            double val3 = field(v3i);
+
+            // Helper lambda to process an edge intersection
+            auto processIntersection = [&](int ui, int vi, double val_u, double val_v) {
+                if (std::abs(val_u - val_v)> 1e-9) { // Avoid division by zero
+                    double t = (isoValue - val_u) / (val_v - val_u);
+
+                    // Get precomputed geodesic distances for edge endpoints
+                    double d_up = dist_p(ui);
+                    double d_vp = dist_p(vi);
+                    double d_uq = dist_q(ui);
+                    double d_vq = dist_q(vi);
+
+                    // Check for infinite distances (unreachable vertices)
+                    if (std::isinf(d_up) || std::isinf(d_vp) || std::isinf(d_uq) || std::isinf(d_vq)) {
+                        // Skip this intersection if endpoints are unreachable from p or q
+                        // Or handle differently (e.g., assign a large penalty)
+                        return;
+                        
+            }
+                    // Interpolate geodesic distances to the intersection point x
+                    double d_xp = (1.0 - t) * d_up + t * d_vp; 
+                    double d_xq = (1.0 - t) * d_uq + t * d_vq;
+
+                    totalDistanceSum += (d_xp + d_xq);
+                    intersectionCount++;
+            }
+    };
+
+    // Check edge 1-2
+    if ((val1 < isoValue && val2 > isoValue) || (val1 > isoValue && val2 < isoValue)) {
+        processIntersection(v1i, v2i, val1, val2);
+    }
+    // Check edge 2-3
+    if ((val2 < isoValue && val3 > isoValue) || (val2 > isoValue && val3 < isoValue)) {
+        processIntersection(v2i, v3i, val2, val3);
+    }
+    // Check edge 3-1
+    if ((val3 < isoValue && val1 > isoValue) || (val3 > isoValue && val1 < isoValue)) {
+        processIntersection(v3i, v1i, val3, val1);
+    }
+} // End triangle loop
+
+        // Calculate average distance for this iso-value
+        if (intersectionCount > 0) {
+            D(k) = totalDistanceSum / static_cast<double>(intersectionCount);
+} else {
+    // Handle cases where no intersections are found for an iso-value
+    // (e.g., isoValue matches a vertex value exactly, or numerical issues)
+    // Setting to 0 or NaN might be options depending on desired behavior
+    D(k) = 0.0; // Or std::numeric_limits<double>::quiet_NaN();
+    //std::cerr << "Warning: No intersections found for isoValue " << isoValue << std::endl;
+}
+    } 
+    // Clean up raw distance arrays
+    delete[] dist_p_raw;
+    delete[] dist_q_raw;
+
+    return D;
+}
 // Free function implementation
 SoSeparator* testPairwiseHarmonic(Mesh* mesh, int vertex_p_idx, int vertex_q_idx, Painter* painter) {
     // Create a result separator
@@ -511,26 +621,56 @@ SoSeparator* testPairwiseHarmonic(Mesh* mesh, int vertex_p_idx, int vertex_q_idx
     PairwiseHarmonics ph(mesh);
     
     // Compute the Laplacian
+    std::cout << "Computing Cotangent Laplacian..." << std::endl;
     if (!ph.computeCotangentLaplacian()) {
         std::cerr << "Failed to compute Laplacian!" << std::endl;
         return result;
     }
+    std::cout << "Laplacian computed." << std::endl;
     
     // Compute the pairwise harmonic function
+    std::cout << "Computing Pairwise Harmonic for vertices " << vertex_p_idx << " and " << vertex_q_idx << "..." << std::endl;
     Eigen::VectorXd harmonicField = ph.computePairwiseHarmonic(vertex_p_idx, vertex_q_idx);
     
     if (harmonicField.size() == 0) {
         std::cerr << "Failed to compute pairwise harmonic!" << std::endl;
         return result;
     }
-    
+    std::cout << "Pairwise harmonic computed." << std::endl;
+
     // Visualize the harmonic field
     SoSeparator* fieldVisualization = ph.visualizeHarmonicField(harmonicField, painter);
     result->addChild(fieldVisualization);
     
     // Highlight the source and target vertices
-    result->addChild(painter->get1PointSep(mesh, vertex_p_idx, 0.0f, 0.0f, 1.0f, 10.0f, false)); // Blue for p (value 0)
-    result->addChild(painter->get1PointSep(mesh, vertex_q_idx, 1.0f, 0.0f, 0.0f, 10.0f, false)); // Red for q (value 1)
+    result->addChild(painter->get1PointSep(mesh, vertex_p_idx, 0.0f, 0.0f, 1.0f, 5.0f, false)); // Blue for p (value 0)
+    result->addChild(painter->get1PointSep(mesh, vertex_q_idx, 1.0f, 0.0f, 0.0f, 5.0f, false)); // Red for q (value 1)
+
+    // --- Test R descriptor ---
+    int numSamplesK = 10; // Number of samples for R descriptor
+    std::cout << "Computing R Descriptor with K=" << numSamplesK << "..." << std::endl;
+    Eigen::VectorXd R_descriptor = ph.computeRDescriptor(harmonicField, numSamplesK);
+
+    if (R_descriptor.size() ==  numSamplesK) {
+        std::cout << "R Descriptor computed successfully." << std::endl;
+        std::cout << R_descriptor.transpose() << std::endl; // Print the vector horizontally
+    } else {
+        std::cerr << "Failed to compute R Descriptor or size mismatch!" << std::endl;
+    }
+    // --- End R descriptor test ---
+
+    // --- Test D descriptor ---
+    std::cout << "Computing D Descriptor with K=" << numSamplesK << "..." << std::endl;
+    Eigen::VectorXd D_descriptor = ph.computeDDescriptor(vertex_p_idx, vertex_q_idx, harmonicField, numSamplesK);
+
+    if (D_descriptor.size() == numSamplesK) {
+        std::cout << "D Descriptor computed successfully." << std::endl;
+        std::cout << D_descriptor.transpose() << std::endl; // Print the vector horizontally
+    } else {
+        std::cerr << "Failed to compute D Descriptor or size mismatch!" << std::endl;
+    }
+
+    // --- End D descriptor test ---
     
     return result;
 }

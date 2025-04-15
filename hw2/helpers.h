@@ -100,8 +100,18 @@ public:
      */
     Eigen::VectorXd computeRDescriptor(const Eigen::VectorXd& field, int numSamplesK);
 
-    // Placeholder for D descriptor - requires geodesic distance implementation/access
-    // Eigen::VectorXd computeDDescriptor(int vertex_p_idx, int vertex_q_idx, const Eigen::VectorXd& field, int numSamplesK);
+    /** 
+     * Computes the D descriptor (average geodesic distance distribution) for a given harmonic field.
+     *  Requires geodesic distance from the source (p) and target (q) vertices.
+     * @param vertex_p_idx Index of the source vertex p (field value 0).
+     * @param vertex_q_idx Index of the target vertex q (field value 1).
+     * @param field The computed harmonic field.
+     * @param numSamplesK The umber of iso-curves to sample for the descriptor.
+     * @return An Eigen::VectorXd of size numSamplesK containing the average geodesic distances for sampled iso-curves.
+    */
+   Eigen::VectorXd computeDDescriptor(int vertex_p_idx, int vertex_q_idx, const Eigen::VectorXd& field, int numSamplesK);
+
+    
 };
 
 /**
