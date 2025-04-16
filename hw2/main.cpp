@@ -66,6 +66,7 @@ void visualizeFarthestPointSampling(int numSamples);
 void loadNewMesh(const string& meshPath);
 void computeAndVisualizePatches(const string& meshPath);
 void testPairwiseHarmonics();
+SoSeparator* computeAndVisualizeSymmetry(Mesh* mesh, Painter* painter);
 
 /**
  * Load a new mesh and prepare it for visualization
@@ -582,6 +583,182 @@ void testPairwiseHarmonics() {
     g_viewer->viewAll();
 }
 
+SoSeparator* computeAndVisualizeSymmetry(Mesh* mesh, Painter* painter){
+	SoSeparator* symmetryResult = new SoSeparator();
+
+	// Add mesh visualization
+	symmetryResult->addChild(painter->getShapeSep(mesh));
+
+	int numFpsSamples = 50; // Choose number of points for FPS
+	std::cout << "Running Farthest Point Sampling with " << numFpsSamples << "samples..." << std::endl;
+	std::vector<int> fps_samples = mesh->farthestPointSampling(numFpsSamples);
+	std::cout << "FPS completed. Got " << fps_samples.size() << " samples." << std::endl;
+
+	if (fps_samples.size() < 2) {
+		std::cerr << "Need at least 2 FPS samples to form pairs." << std::endl;
+		// Handle error or return
+		return nullptr;
+	}
+	PairwiseHarmonics ph(mesh);
+	//Pre-compute Laplacian once if needed by PairwiseHarmonics constructor or a separate call
+	std::cout << "Computing Cotangent Laplacian..." << std::endl;
+	if(!ph.computeCotangentLaplacian()){
+		std::cerr << "Failed to compute Laplacian!" << std::endl;
+		return nullptr; // Handle error or return
+	}
+	std::cout << "Laplacian computed." << std::endl;
+
+	int numSamplesK = 10; // K for R/D descriptors
+	double pis_threshold = 0.7; // PIS threshold for voting
+	double sigma_gaussian = pis_threshold / 2.0; // Sigma for vote weighting
+
+
+	std::vector<double> face_votes(mesh->tris.size(), 0.0);
+	int pair_count = 0;
+
+	std::cout << "Processing " << (fps_samples.size() * (fps_samples.size() - 1) / 2) << " candidate pairs..." << std::endl;
+
+	// Iterate through unique pairs from FPS samples
+
+	for (size_t i = 0; i < fps_samples.size();++i){
+		for(size_t j = i + 1; j<fps_samples.size();++j){
+			int p = fps_samples[i];
+			int q = fps_samples[j];
+
+			pair_count++;
+
+			if (pair_count % 10 == 0) { // Print progress
+				std::cout << "Processing pair " << pair_count << " (" << p << ", " << q << ")" << std::endl;
+				
+		}
+
+		// --- Optional Filtering ---
+		// Example: Skip pairs that are too close/far geodesically
+		// float* dist_p_raw = mesh->computeGeodesicDistances(p, dummy_N);
+		// if (dist_p_raw && dist_p_raw[q] < min_geo_dist || dist_p_raw[q] > max_geo_dist) {
+		//     delete[] dist_p_raw;
+		//     continue;
+		// }
+		// delete[] dist_p_raw;
+		// --- End Optional Filtering ---
+
+
+		// 1. Compute fields f_pq and f_qp
+		Eigen::VectorXd f_pq = ph.computePairwiseHarmonic(p, q);
+		Eigen::VectorXd f_qp = ph.computePairwiseHarmonic(q, p);
+
+		if (f_pq.size() == 0||f_qp.size() == 0) {
+			std::cerr << "Skipping pair (" << p << ", " << q << ") due to harmonic computation failure." << std::endl;
+			continue; // Skip if computation failed
+		}
+
+		// 2. Compute R and D descriptors
+
+		Eigen::VectorXd R_pq = ph.computeRDescriptor(f_pq, numSamplesK);
+		Eigen::VectorXd D_pq = ph.computeDDescriptor(p,q,f_pq, numSamplesK);
+		Eigen::VectorXd R_qp = ph.computeRDescriptor(f_qp, numSamplesK);
+		Eigen::VectorXd D_qp = ph.computeDDescriptor(q,p,f_qp, numSamplesK);
+
+		// Check if descriptors are valid (e.g., correct size)
+		if (R_pq.size() != numSamplesK || D_pq.size() != numSamplesK ||
+			R_qp.size() != numSamplesK || D_qp.size() != numSamplesK) {
+			std::cerr << " Skipping pair (" << p << ", " << q << ") due to descriptor computation failure." << std::endl;
+			continue; // Skip if computation failed
+		}
+		
+		// 3. Compute PIS score
+		double pis_score = ph.computePIS(R_pq, D_pq, R_qp, D_qp);
+
+		// 4. Check threshold and vote
+
+		if (pis_score > pis_threshold){
+			std::cout << "  Pair (" << p << ", " << q << ") has high PIS score: " << pis_score << ". Voting..." << std::endl;
+			double vote_weight = std::exp(-std::pow(pis_score - 1.0, 2) / (2.0 * sigma_gaussian * sigma_gaussian));
+
+			// Find midpoint iso-curve (isoValue = 0.5)
+			double mid_isoValue = 0.5;
+
+			// Assuming extractIsoCurveSegments exists and returns segments
+			std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> mid_segments = ph.extractIsoCurveSegments(f_pq, mid_isoValue);
+
+			// Find faces intersected by the midpoint curve segments
+			for (const auto& segment : mid_segments) {
+				// Find the face closest to the midpoint of the segment.
+				Eigen::Vector3d segment_midpoint = (segment.first + segment.second) * 0.5;
+
+				// You'll need a function in Mesh.cpp to find the closest face index
+				// int closest_face_idx = mesh->findClosestFace(segment_midpoint);
+				int closest_face_idx = -1; // Placeholder - IMPLEMENT findClosestFace
+
+				// Basic placeholder: Iterate faces and find one whose centroid is close
+				double min_dist_sq = std::numeric_limits<double>::max();
+				for(size_t face_idx = 0; face_idx < mesh->tris.size(); ++face_idx) {
+					Eigen::Vector3d centroid = mesh->getFaceCentroid(face_idx); // Assumes Mesh::getFaceCentroid exists
+					double dist_sq = (centroid - segment_midpoint).squaredNorm();
+					if (dist_sq < min_dist_sq) {
+						min_dist_sq = dist_sq;
+						closest_face_idx = face_idx;
+					}
+				}
+
+				if (closest_face_idx != -1) {
+					face_votes[closest_face_idx] += vote_weight; // Add weighted vote
+				}
+			}
+		}
+	}
+}
+	std::cout << "Finished processing pairs." << std::endl;
+
+    // --- Extract and Visualize Symmetry Axis/Regions ---
+    std::cout << "Analyzing votes..." << std::endl;
+    double max_vote = 0.0;
+    for (double vote : face_votes) {
+        if (vote > max_vote) {
+            max_vote = vote;
+        }
+    }
+    std::cout << "Max vote: " << max_vote << std::endl;
+
+    if (max_vote > 1e-6) { // Only visualize if there are significant votes
+        SoSeparator* symmetryAxisSep = new SoSeparator();
+        SoMaterial* axisMat = new SoMaterial();
+        axisMat->diffuseColor.setValue(0.0f, 1.0f, 0.0f); // Green for symmetry axis
+        symmetryAxisSep->addChild(axisMat);
+        SoCoordinate3* axisCoords = new SoCoordinate3();
+        SoIndexedFaceSet* axisFaces = new SoIndexedFaceSet();
+
+        std::vector<int> vertex_map(mesh->verts.size(), -1);
+        int axis_coord_idx = 0;
+        int axis_face_vtx_idx = 0;
+
+        double vote_display_threshold = max_vote * 0.5; // Show faces with >= 50% of max vote
+
+        for (size_t face_idx = 0; face_idx < face_votes.size(); ++face_idx) {
+            if (face_votes[face_idx] >= vote_display_threshold) {
+                Triangle* tri = mesh->tris[face_idx];
+                int v_indices[] = {tri->v1i, tri->v2i, tri->v3i};
+                for (int v_idx : v_indices) {
+                    if (vertex_map[v_idx] == -1) {
+                        vertex_map[v_idx] = axis_coord_idx;
+                        axisCoords->point.set1Value(axis_coord_idx++, mesh->verts[v_idx]->coords);
+                    }
+                    axisFaces->coordIndex.set1Value(axis_face_vtx_idx++, vertex_map[v_idx]);
+                }
+                axisFaces->coordIndex.set1Value(axis_face_vtx_idx++, -1);
+            }
+        }
+        symmetryAxisSep->addChild(axisCoords);
+        symmetryAxisSep->addChild(axisFaces);
+        symmetryResult->addChild(symmetryAxisSep);
+        std::cout << "Added symmetry axis visualization." << std::endl;
+    } else {
+         std::cout << "No significant symmetry votes found." << std::endl;
+    }
+
+	return symmetryResult;
+}
+
 /**
  * Display the application menu
  */
@@ -591,9 +768,10 @@ void displayMenu() {
     cout << "2. Visualize farthest point sampling" << endl;
     cout << "3. Compute and visualize patches (using mesh 249.off)" << endl;
     cout << "4. Compute and visualize patches (using mesh 348.off)" << endl;
-    cout << "5. Test pairwise harmonics for intrinsic symmetry (Phase 1)" << endl;
-    cout << "6. Exit" << endl;
-    cout << "Enter your choice (1-6): ";
+    cout << "5. Test pairwise harmonics (Phase 1 & 2 Test)" << endl;
+    cout << "6. Compute and visualize intrinsic symmetry (Phase 3)" << endl; // New option
+    cout << "7. Exit" << endl; // Renumber Exit
+    cout << "Enter your choice (1-7): "; // Update range
 }
 
 /**
@@ -669,13 +847,17 @@ int main(int, char** argv)
  * Thread function to handle console input
  * Runs separately from the main rendering thread
  */
-DWORD WINAPI ConsoleInputThread(LPVOID lpParam) 
+DWORD WINAPI ConsoleInputThread(LPVOID lpParam)
 {
     int choice = 0;
-    
-    while (choice != 6) {  // Update exit condition to 6
+
+    while (choice != 7) {  // Update exit condition to 7
         cin >> choice;
-        
+
+        // Clear input buffer after reading choice
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+
+
         switch (choice) {
             case 1: { // Geodesic path
                 int source, target;
@@ -683,52 +865,73 @@ DWORD WINAPI ConsoleInputThread(LPVOID lpParam)
                 cin >> source;
                 cout << "Enter target vertex (0-" << g_mesh->verts.size() - 1 << "): ";
                 cin >> target;
-                
+                // Clear input buffer after reading numbers
+                cin.ignore(numeric_limits<streamsize>::max(), '\n');
+
                 visualizeGeodesicPath(source, target);
                 break;
             }
-            
+
             case 2: { // Farthest point sampling
                 int numSamples;
                 cout << "Enter number of samples (2-" << g_mesh->verts.size() << "): ";
                 cin >> numSamples;
-                
+                cin.ignore(numeric_limits<streamsize>::max(), '\n');
+
                 visualizeFarthestPointSampling(numSamples);
                 break;
             }
-            
+
             case 3: { // Patching with 249.off
                 string meshPath = "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw1src/249.off";
                 computeAndVisualizePatches(meshPath);
                 break;
             }
-            
+
             case 4: { // Patching with 348.off
                 string meshPath = "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw1src/348.off";
                 computeAndVisualizePatches(meshPath);
                 break;
             }
-            
+
             case 5: { // Test pairwise harmonics
                 testPairwiseHarmonics();
                 break;
             }
-            
-            case 6: // Exit
+
+            case 6: { // Compute and visualize symmetry
+                if (g_mesh && g_painter) {
+                     // Clear previous visualization (except base mesh)
+                     while (g_root->getNumChildren() > 1) {
+                         g_root->removeChild(1);
+                     }
+                     // Call the function and add the result to the main scene graph
+                     SoSeparator* symmetryViz = computeAndVisualizeSymmetry(g_mesh, g_painter);
+                     if (symmetryViz) { // Check if it returned something
+                        g_root->addChild(symmetryViz); // Add to the global root
+                     }
+                     g_viewer->viewAll(); // Update viewer after computation
+                } else {
+                    std::cout << "Error: Mesh or painter not initialized." << std::endl;
+                }
+                break;
+            }
+
+            case 7: // Exit
                 cout << "Exiting program." << endl;
                 SoWin::exitMainLoop(); // Request exit from the main Coin3D loop
                 break;
-                
+
             default:
                 cout << "Invalid choice. Please try again." << endl;
                 break;
         }
-        
-        if (choice != 6) {  // Update condition to 6
+
+        if (choice != 7) {  // Update condition to 7
             displayMenu(); // Show the menu again for next input
         }
     }
-    
+
     return 0;
 }
 

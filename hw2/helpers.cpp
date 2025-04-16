@@ -3,6 +3,7 @@
 #include <vector>
 #include <algorithm>
 #include <cfloat>
+#include <utility>
 
 // Standard C++ headers and Eigen headers BEFORE Windows.h and Coin3D headers
 #include <Eigen/Dense>
@@ -612,6 +613,98 @@ Eigen::VectorXd PairwiseHarmonics::computeDDescriptor(int vertex_p_idx, int vert
 
     return D;
 }
+
+double PairwiseHarmonics::computePIS(const Eigen::VectorXd& R_pq, const Eigen::VectorXd& D_pq, const Eigen::VectorXd& R_qp, const Eigen::VectorXd& D_qp){
+    int K = R_pq.size();
+    if (K == 0 || K != D_pq.size() || K != R_qp.size() || K != D_qp.size()) {
+        std::cerr << "Error: Descriptor size mismatch in computePIS. K=" << K << std::endl;
+        return 0.0; // Indicate error or poor symmetry
+    }
+
+    double sum_L = 0.0;
+    for (int k = 0; k<K; ++k){
+        double r_pq_k = R_pq(k);
+        double d_pq_k = D_pq(k);
+        // Note :Paper uses 1-based indexing, C++ uses 0-based
+        // k maps to paper's k+1. K-k maps to paper's K-(K+1)+1 = K-k.
+        // We need R_qp(K-1-k) and D_qp(K-1-k) for 0-based index.
+        int k_sym = K - 1 - k;
+        double r_qp_sym = R_qp(k_sym);
+        double d_qp_sym = D_qp(k_sym);
+
+        // L(x, y) = |x- y| / (x+ y) - handle division by zero
+
+        auto compute_L = [](double x, double y) {
+            if (std::abs(x+y)<1e-9) {
+                return 0.0; // If both are near zero, difference is small, treat as symmetric
+            }
+            return std::abs(x-y) / (x+y);
+        };
+
+        sum_L += compute_L(r_pq_k, r_qp_sym);
+        sum_L += compute_L(d_pq_k, d_qp_sym);
+    }
+
+    // PIS = exp(- (1/K)*sum_L)
+    double pis_score = std::exp(-sum_L / static_cast<double>(K));
+    return pis_score;
+}
+
+std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> PairwiseHarmonics::extractIsoCurveSegments(const Eigen::VectorXd& field, double isoValue) {
+    std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> segments;
+
+    // Iterate through each triangle
+    for (const auto& tri : mesh->tris) {
+        int v1i = tri->v1i;
+        int v2i = tri->v2i;
+        int v3i = tri->v3i;
+
+        double val1 = field(v1i);
+        double val2 = field(v2i);
+        double val3 = field(v3i);
+
+        const SbVec3f& p1_coords = mesh->verts[v1i]->coords;
+        const SbVec3f& p2_coords = mesh->verts[v2i]->coords;
+        const SbVec3f& p3_coords = mesh->verts[v3i]->coords;
+
+        Eigen::Vector3d p1(p1_coords[0], p1_coords[1], p1_coords[2]);
+        Eigen::Vector3d p2(p2_coords[0], p2_coords[1], p2_coords[2]);
+        Eigen::Vector3d p3(p3_coords[0], p3_coords[1], p3_coords[2]);
+
+        std::vector<Eigen::Vector3d> intersectionPoints;
+
+        // Check edge 1-2
+        if ((val1 < isoValue && val2 > isoValue) || (val1 > isoValue && val2 < isoValue)) {
+            if (std::abs(val1 - val2) > 1e-9) {
+                double t = (isoValue - val1) / (val2 - val1);
+                intersectionPoints.push_back(p1 + t * (p2 - p1));
+            }
+        }
+        // Check edge 2-3
+        if ((val2 < isoValue && val3 > isoValue) || (val2 > isoValue && val3 < isoValue)) {
+            if (std::abs(val2 - val3) > 1e-9) {
+                double t = (isoValue - val2) / (val3 - val2);
+                intersectionPoints.push_back(p2 + t * (p3 - p2));
+            }
+        }
+        // Check edge 3-1
+        if ((val3 < isoValue && val1 > isoValue) || (val3 > isoValue && val1 < isoValue)) {
+            if (std::abs(val3 - val1) > 1e-9) {
+                double t = (isoValue - val3) / (val1 - val3);
+                intersectionPoints.push_back(p3 + t * (p1 - p3));
+            }
+        }
+
+        // If exactly two intersection points are found in this triangle, add the segment
+        if (intersectionPoints.size() == 2) {
+            segments.push_back({intersectionPoints[0], intersectionPoints[1]});
+        }
+        // Handle cases with more intersections if necessary (e.g., iso-value passes through a vertex)
+        // For simplicity, we only handle the standard case of crossing two edges here.
+    }
+    return segments;
+}
+
 // Free function implementation
 SoSeparator* testPairwiseHarmonic(Mesh* mesh, int vertex_p_idx, int vertex_q_idx, Painter* painter) {
     // Create a result separator

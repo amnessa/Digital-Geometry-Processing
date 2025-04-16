@@ -4,6 +4,11 @@
 #include <iostream>
 #include <fstream>
 #include <string>
+#include <vector>
+#include <queue>
+#include <limits>
+#include <cmath>
+#include <Eigen/Dense>
 
 // Project headers
 #include "Mesh.h"
@@ -575,4 +580,27 @@ void Mesh::normalizeCoordinates() {
     
     printf("Mesh normalized: Scale=%f, Center=(%f,%f,%f)\n", 
            scale, centerX, centerY, centerZ);
+}
+
+/**
+ * Computes the geometric centroid of a given face (triangle).
+ * @param face_idx The index of the triangle in the mesh->tris vector.
+ * @return The 3D coordinates of the centroid as an Eigen::Vector3d.
+ *         Returns a zero vector if the face index is invalid.
+ */
+Eigen::Vector3d Mesh::getFaceCentroid(int face_idx) {
+    if (face_idx < 0 || face_idx >= tris.size()) {
+        std::cerr << "Error: Invalid face index in getFaceCentroid." << face_idx << std::endl;
+        return Eigen::Vector3d::Zero();
+    }
+    Triangle* tri = tris[face_idx];
+    Vertex* v1 = verts[tri->v1i];
+    Vertex* v2 = verts[tri->v2i];
+    Vertex* v3 = verts[tri->v3i];
+
+    Eigen::Vector3d p1(v1->coords[0], v1->coords[1], v1->coords[2]);
+    Eigen::Vector3d p2(v2->coords[0], v2->coords[1], v2->coords[2]);
+    Eigen::Vector3d p3(v3->coords[0], v3->coords[1], v3->coords[2]);
+
+    return (p1+p2 +p3)/3.0; // Return centroid
 }

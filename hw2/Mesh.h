@@ -171,4 +171,12 @@ public:
 	 * Centers the mesh and scales it to fit within [-1,1] range
 	 */
 	void normalizeCoordinates();
+
+    /**
+     * Computes the geometric centroid of a given face (triangle).
+     * @param face_idx The index of the triangle in the mesh->tris vector.
+     * @return The 3D coordinates of the centroid as an Eigen::Vector3d.
+     *         Returns a zero vector if the face index is invalid.
+     */
+    Eigen::Vector3d getFaceCentroid(int face_idx);
 };

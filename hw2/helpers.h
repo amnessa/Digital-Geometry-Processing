@@ -111,7 +111,26 @@ public:
     */
    Eigen::VectorXd computeDDescriptor(int vertex_p_idx, int vertex_q_idx, const Eigen::VectorXd& field, int numSamplesK);
 
-    
+   /**
+    * Computes the Path Intrinsic Symmetry (PIS) score between two vertices p and q.
+    * Requires the R and D descriptors computed for both (p,q) and (q,p) pairs.
+    * @param R_pq R descriptor for the harmonic field f_pq.
+    * @param D_pq D descriptor for the harmonic field f_pq.
+    * @param R_qp R descriptor for the harmonic field f_qp.
+    * @param D_qp D descriptor for the harmonic field f_qp.
+    * @return The scalar PIS score. Higher values indicate better symmetry.
+    */
+   double computePIS(const Eigen::VectorXd& R_pq, const Eigen::VectorXd& D_pq, const Eigen::VectorXd& R_qp, const Eigen::VectorXd& D_qp);
+
+    /**
+     * Extracts the line segments forming the iso-curve for a given value.
+     * @param field The scalar field (e.g., harmonic function) defined on vertices.
+     * @param isoValue The value for which to extract the iso-curve.
+     * @return A vector of pairs, where each pair represents the start and end
+     *         3D coordinates of an iso-curve segment.
+     */
+    std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> extractIsoCurveSegments(const Eigen::VectorXd& field, double isoValue);
+
 };
 
 /**
