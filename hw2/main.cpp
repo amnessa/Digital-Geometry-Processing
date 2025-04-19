@@ -589,7 +589,7 @@ SoSeparator* computeAndVisualizeSymmetry(Mesh* mesh, Painter* painter){
 	// Add mesh visualization
 	symmetryResult->addChild(painter->getShapeSep(mesh));
 
-	int numFpsSamples = 50; // Choose number of points for FPS
+	int numFpsSamples = 20; // Choose number of points for FPS
 	std::cout << "Running Farthest Point Sampling with " << numFpsSamples << "samples..." << std::endl;
 	std::vector<int> fps_samples = mesh->farthestPointSampling(numFpsSamples);
 	std::cout << "FPS completed. Got " << fps_samples.size() << " samples." << std::endl;
@@ -612,9 +612,18 @@ SoSeparator* computeAndVisualizeSymmetry(Mesh* mesh, Painter* painter){
 	double pis_threshold = 0.8; // PIS threshold for voting
 	double sigma_gaussian = pis_threshold / 2.0; // Sigma for vote weighting
 
+    // --- Calculate Geodesic Distance Threshold for Filtering ---
+    float bbox_diagonal = mesh->getBoundingBoxDiagonal();
+    float estimated_max_geo_dist = bbox_diagonal * 0.5f; // Estimate max geo dist (e.g., 50% of diagonal)
+    float dmin_threshold = estimated_max_geo_dist / 5.0f; // 1/5th of estimated max
+    std::cout << "Bounding Box Diagonal: " << bbox_diagonal << std::endl;
+    std::cout << "Estimated Max Geodesic Distance: " << estimated_max_geo_dist << std::endl;
+    std::cout << "Geodesic Distance Filter Threshold (d_min): " << dmin_threshold << std::endl;
+    // --- End Threshold Calculation ---
 
 	std::vector<double> face_votes(mesh->tris.size(), 0.0);
 	int pair_count = 0;
+    int pairs_filtered = 0; // Count filtered pairs
 
 	std::cout << "Processing " << (fps_samples.size() * (fps_samples.size() - 1) / 2) << " candidate pairs..." << std::endl;
 
@@ -630,76 +639,91 @@ SoSeparator* computeAndVisualizeSymmetry(Mesh* mesh, Painter* painter){
 			if (pair_count % 10 == 0) { // Print progress
 				std::cout << "Processing pair " << pair_count << " (" << p << ", " << q << ")" << std::endl;
 				
-		}
+			}
 
-		// --- Optional Filtering ---
-		// Example: Skip pairs that are too close/far geodesically
-		// float* dist_p_raw = mesh->computeGeodesicDistances(p, dummy_N);
-		// if (dist_p_raw && dist_p_raw[q] < min_geo_dist || dist_p_raw[q] > max_geo_dist) {
-		//     delete[] dist_p_raw;
-		//     continue;
-		// }
-		// delete[] dist_p_raw;
-		// --- End Optional Filtering ---
+            // --- Optional Filtering ---
+            // Filter pairs that are too close geodesically
+            // Note: computeGeodesicDistances computes distances from p to ALL vertices
+			int N = mesh->verts.size(); // Number of vertices in the mesh
+            float* dist_p_raw = mesh->computeGeodesicDistances(p, N);
+            if (!dist_p_raw) {
+                 std::cerr << "Warning: Failed to compute geodesic distances from " << p << ". Skipping pair." << std::endl;
+                 continue;
+            }
 
+            float geo_dist_pq = dist_p_raw[q];
+            delete[] dist_p_raw; // Free memory immediately after use
 
-		// 1. Compute fields f_pq and f_qp
-		Eigen::VectorXd f_pq = ph.computePairwiseHarmonic(p, q);
-		Eigen::VectorXd f_qp = ph.computePairwiseHarmonic(q, p);
+            if (geo_dist_pq == FLT_MAX) { // Check for unreachability
+                 std::cout << "  Skipping pair (" << p << ", " << q << ") - vertices unreachable." << std::endl;
+                 pairs_filtered++;
+                 continue;
+            }
 
-		if (f_pq.size() == 0||f_qp.size() == 0) {
-			std::cerr << "Skipping pair (" << p << ", " << q << ") due to harmonic computation failure." << std::endl;
-			continue; // Skip if computation failed
-		}
+            if (geo_dist_pq < dmin_threshold) {
+                 std::cout << "  Skipping pair (" << p << ", " << q << ") - Geodesic distance " << geo_dist_pq << " < " << dmin_threshold << std::endl;
+                 pairs_filtered++;
+                 continue; // Skip this pair
+            }
+            // --- End Optional Filtering ---
 
-		// 2. Compute R and D descriptors
+			// 1. Compute fields f_pq and f_qp
+			Eigen::VectorXd f_pq = ph.computePairwiseHarmonic(p, q);
+			Eigen::VectorXd f_qp = ph.computePairwiseHarmonic(q, p);
 
-		Eigen::VectorXd R_pq = ph.computeRDescriptor(f_pq, numSamplesK);
-		Eigen::VectorXd D_pq = ph.computeDDescriptor(p,q,f_pq, numSamplesK);
-		Eigen::VectorXd R_qp = ph.computeRDescriptor(f_qp, numSamplesK);
-		Eigen::VectorXd D_qp = ph.computeDDescriptor(q,p,f_qp, numSamplesK);
+			if (f_pq.size() == 0||f_qp.size() == 0) {
+				std::cerr << "Skipping pair (" << p << ", " << q << ") due to harmonic computation failure." << std::endl;
+				continue; // Skip if computation failed
+			}
 
-		// Check if descriptors are valid (e.g., correct size)
-		if (R_pq.size() != numSamplesK || D_pq.size() != numSamplesK ||
-			R_qp.size() != numSamplesK || D_qp.size() != numSamplesK) {
-			std::cerr << " Skipping pair (" << p << ", " << q << ") due to descriptor computation failure." << std::endl;
-			continue; // Skip if computation failed
-		}
-		
-		// 3. Compute PIS score
-		double pis_score = ph.computePIS(R_pq, D_pq, R_qp, D_qp);
+			// 2. Compute R and D descriptors
 
-		// 4. Check threshold and vote
+			Eigen::VectorXd R_pq = ph.computeRDescriptor(f_pq, numSamplesK);
+			Eigen::VectorXd D_pq = ph.computeDDescriptor(p,q,f_pq, numSamplesK);
+			Eigen::VectorXd R_qp = ph.computeRDescriptor(f_qp, numSamplesK);
+			Eigen::VectorXd D_qp = ph.computeDDescriptor(q,p,f_qp, numSamplesK);
 
-		if (pis_score > pis_threshold){
-			std::cout << "  Pair (" << p << ", " << q << ") has high PIS score: " << pis_score << ". Voting..." << std::endl;
-			double vote_weight = std::exp(-std::pow(pis_score - 1.0, 2) / (2.0 * sigma_gaussian * sigma_gaussian));
+			// Check if descriptors are valid (e.g., correct size)
+			if (R_pq.size() != numSamplesK || D_pq.size() != numSamplesK ||
+				R_qp.size() != numSamplesK || D_qp.size() != numSamplesK) {
+				std::cerr << " Skipping pair (" << p << ", " << q << ") due to descriptor computation failure." << std::endl;
+				continue; // Skip if computation failed
+			}
+			
+			// 3. Compute PIS score
+			double pis_score = ph.computePIS(R_pq, D_pq, R_qp, D_qp);
 
-			// Find midpoint iso-curve (isoValue = 0.5)
-			double mid_isoValue = 0.5;
+			// 4. Check threshold and vote
 
-			// Assuming extractIsoCurveSegments exists and returns segments
-			std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> mid_segments = ph.extractIsoCurveSegments(f_pq, mid_isoValue);
+			if (pis_score > pis_threshold){
+				std::cout << "  Pair (" << p << ", " << q << ") has high PIS score: " << pis_score << ". Voting..." << std::endl;
+				double vote_weight = std::exp(-std::pow(pis_score - 1.0, 2) / (2.0 * sigma_gaussian * sigma_gaussian));
 
-			// Find faces intersected by the midpoint curve segments
-			for (const auto& segment : mid_segments) {
-				// Find the face closest to the midpoint of the segment.
-				Eigen::Vector3d segment_midpoint = (segment.first + segment.second) * 0.5;
+				// Find midpoint iso-curve (isoValue = 0.5)
+				double mid_isoValue = 0.5;
 
-				 // Use the robust findClosestFace function from Mesh.cpp
-				int closest_face_idx = mesh->findClosestFace(segment_midpoint);
+				// Assuming extractIsoCurveSegments exists and returns segments
+				std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> mid_segments = ph.extractIsoCurveSegments(f_pq, mid_isoValue);
 
-				if (closest_face_idx != -1) {
-					face_votes[closest_face_idx] += vote_weight; // Add weighted vote
-				} else {
-					// Optional: Handle case where no closest face was found (e.g., mesh has no faces)
-					// std::cerr << "Warning: Could not find closest face for a segment midpoint." << std::endl;
+				// Find faces intersected by the midpoint curve segments
+				for (const auto& segment : mid_segments) {
+					// Find the face closest to the midpoint of the segment.
+					Eigen::Vector3d segment_midpoint = (segment.first + segment.second) * 0.5;
+
+					 // Use the robust findClosestFace function from Mesh.cpp
+					int closest_face_idx = mesh->findClosestFace(segment_midpoint);
+
+					if (closest_face_idx != -1) {
+						face_votes[closest_face_idx] += vote_weight; // Add weighted vote
+					} else {
+						// Optional: Handle case where no closest face was found (e.g., mesh has no faces)
+						// std::cerr << "Warning: Could not find closest face for a segment midpoint." << std::endl;
+					}
 				}
 			}
 		}
 	}
-}
-	std::cout << "Finished processing pairs." << std::endl;
+	std::cout << "Finished processing pairs. Filtered out " << pairs_filtered << " pairs based on geodesic distance." << std::endl;
 
     // --- Extract and Visualize Symmetry Axis/Regions ---
     std::cout << "Analyzing votes..." << std::endl;

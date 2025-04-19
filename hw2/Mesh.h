@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <cstdio>
+#include <Eigen/Dense> // Ensure Eigen is included
 using namespace std;
 
 /**
@@ -223,5 +224,9 @@ public:
 
 	 int findClosestFace(const Eigen::Vector3d& point);
 
-	 
+	/**
+	 * @brief Computes the length of the diagonal of the mesh's axis-aligned bounding box.
+	 * @return The length of the bounding box diagonal. Returns 0 if mesh has no vertices.
+	 */
+	float getBoundingBoxDiagonal() const;
 };

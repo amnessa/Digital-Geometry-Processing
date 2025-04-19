@@ -10,6 +10,7 @@
 #include <cmath>
 #include <Eigen/Dense>
 #include <limits> // Required for std::numeric_limits
+#include <cmath> // For std::sqrt
 
 // Project headers
 #include "Mesh.h"
@@ -858,5 +859,36 @@ int Mesh::findClosestFace(const Eigen::Vector3d& point) {
         // Otherwise, return the face with the closest boundary point
         return closestBoundaryFaceIdx;
     }
+}
+
+/**
+ * @brief Computes the length of the diagonal of the mesh's axis-aligned bounding box.
+ * @return The length of the bounding box diagonal. Returns 0 if mesh has no vertices.
+ */
+float Mesh::getBoundingBoxDiagonal() const {
+    if (verts.empty()) {
+        return 0.0f;
+    }
+
+    // Find bounding box
+    float minX = std::numeric_limits<float>::max(), minY = std::numeric_limits<float>::max(), minZ = std::numeric_limits<float>::max();
+    float maxX = -std::numeric_limits<float>::max(), maxY = -std::numeric_limits<float>::max(), maxZ = -std::numeric_limits<float>::max();
+
+    for (const Vertex* v : verts) {
+        minX = std::min(minX, v->coords[0]);
+        minY = std::min(minY, v->coords[1]);
+        minZ = std::min(minZ, v->coords[2]);
+
+        maxX = std::max(maxX, v->coords[0]);
+        maxY = std::max(maxY, v->coords[1]);
+        maxZ = std::max(maxZ, v->coords[2]);
+    }
+
+    // Calculate diagonal length
+    float dx = maxX - minX;
+    float dy = maxY - minY;
+    float dz = maxZ - minZ;
+
+    return std::sqrt(dx * dx + dy * dy + dz * dz);
 }
 

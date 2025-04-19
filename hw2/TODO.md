@@ -2,7 +2,7 @@
 
 ## High Priority / Core Functionality
 
--   **[ ] Implement Robust `findClosestFace` for Voting (`main.cpp` / `Mesh.cpp`):**
+-   **[x] Implement Robust `findClosestFace` for Voting (`main.cpp` / `Mesh.cpp`):**
     -   The current voting mechanism in [`computeAndVisualizeSymmetry`](c:\Users\cagopa\Desktop\Digital-Geometry-Processing\hw2\main.cpp#L690-L702) uses a placeholder that finds the face with the closest *centroid* to the isocurve segment midpoint.
     -   Replace this with a more accurate method, potentially in `Mesh.cpp` (e.g., `mesh->findClosestFace(segment_midpoint)` or even better, finding the face(s) the segment *intersects*). See comment at [`main.cpp:693`](c:\Users\cagopa\Desktop\Digital-Geometry-Processing\hw2\main.cpp#L693).
 -   **[x] Complete Obtuse Voronoi Area Calculation (`helpers.cpp`):**
