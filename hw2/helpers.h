@@ -24,6 +24,7 @@ class SoIndexedFaceSet;
 #include <Eigen/Dense>
 #include <Eigen/Sparse>
 #include <Eigen/SparseCholesky>
+#include <Eigen/SparseLU>
 
 #include "Mesh.h"
 
@@ -46,6 +47,10 @@ private:
     // Flag indicating if the Laplacian has been computed
     bool laplacianComputed;
 
+    // +++ Change Solver Type +++
+    Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> laplacianSolver; // Use SimplicialLDLT
+    bool solverComputed; // Flag to track if solver is ready
+
     // Helper methods
     double calculateCotangent(const Eigen::Vector3d& a, const Eigen::Vector3d& b);
     double calculateAngle(const Eigen::Vector3d& a, const Eigen::Vector3d& b);
@@ -57,8 +62,9 @@ public:
      * Constructor
      * @param m Pointer to the mesh
      */
-    PairwiseHarmonics(Mesh* m);
-    
+    // +++ Modify Constructor Declaration +++
+    PairwiseHarmonics(Mesh* m); // Remove the inline definition body {}
+
     /**
      * Compute the cotangent Laplacian matrix for the mesh
      * This implements the cotangent formulation of the Laplace-Beltrami operator
@@ -107,9 +113,11 @@ public:
      * @param vertex_q_idx Index of the target vertex q (field value 1).
      * @param field The computed harmonic field.
      * @param numSamplesK The umber of iso-curves to sample for the descriptor.
+     * @param dist_p Precomputed geodesic distances from vertex p.
+     * @param dist_q Precomputed geodesic distances from vertex q.
      * @return An Eigen::VectorXd of size numSamplesK containing the average geodesic distances for sampled iso-curves.
     */
-   Eigen::VectorXd computeDDescriptor(int vertex_p_idx, int vertex_q_idx, const Eigen::VectorXd& field, int numSamplesK);
+   Eigen::VectorXd computeDDescriptor(int vertex_p_idx, int vertex_q_idx, const Eigen::VectorXd& field, int numSamplesK, const float* dist_p, const float* dist_q);
 
    /**
     * Computes the Path Intrinsic Symmetry (PIS) score between two vertices p and q.

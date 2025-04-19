@@ -584,77 +584,108 @@ void testPairwiseHarmonics() {
 }
 
 SoSeparator* computeAndVisualizeSymmetry(Mesh* mesh, Painter* painter){
-	SoSeparator* symmetryResult = new SoSeparator();
+    SoSeparator* symmetryResult = new SoSeparator();
 
-	// Add mesh visualization
-	symmetryResult->addChild(painter->getShapeSep(mesh));
+    // Add mesh visualization
+    symmetryResult->addChild(painter->getShapeSep(mesh));
 
-	int numFpsSamples = 20; // Choose number of points for FPS
-	std::cout << "Running Farthest Point Sampling with " << numFpsSamples << "samples..." << std::endl;
-	std::vector<int> fps_samples = mesh->farthestPointSampling(numFpsSamples);
-	std::cout << "FPS completed. Got " << fps_samples.size() << " samples." << std::endl;
+    int numFpsSamples = 20; // Choose number of points for FPS
+    std::cout << "Running Farthest Point Sampling with " << numFpsSamples << " samples..." << std::endl;
+    std::vector<int> fps_samples = mesh->farthestPointSampling(numFpsSamples);
+    std::cout << "FPS completed. Got " << fps_samples.size() << " samples." << std::endl;
 
-	if (fps_samples.size() < 2) {
-		std::cerr << "Need at least 2 FPS samples to form pairs." << std::endl;
-		// Handle error or return
-		return nullptr;
-	}
-	PairwiseHarmonics ph(mesh);
-	//Pre-compute Laplacian once if needed by PairwiseHarmonics constructor or a separate call
-	std::cout << "Computing Cotangent Laplacian..." << std::endl;
-	if(!ph.computeCotangentLaplacian()){
-		std::cerr << "Failed to compute Laplacian!" << std::endl;
-		return nullptr; // Handle error or return
-	}
-	std::cout << "Laplacian computed." << std::endl;
+    if (fps_samples.size() < 2) {
+        std::cerr << "Need at least 2 FPS samples to form pairs." << std::endl;
+        return nullptr;
+    }
 
-	int numSamplesK = 10; // K for R/D descriptors
-	double pis_threshold = 0.8; // PIS threshold for voting
-	double sigma_gaussian = pis_threshold / 2.0; // Sigma for vote weighting
+    // Ensure numFpsSamples reflects the actual number obtained
+    numFpsSamples = fps_samples.size();
+
+    PairwiseHarmonics ph(mesh);
+    std::cout << "Computing Cotangent Laplacian..." << std::endl;
+    if(!ph.computeCotangentLaplacian()){
+        std::cerr << "Failed to compute Laplacian!" << std::endl;
+        return nullptr;
+    }
+    std::cout << "Laplacian computed." << std::endl;
+
+    int numSamplesK = 10; // K for R/D descriptors
+    double pis_threshold = 0.8; // PIS threshold for voting
+    double sigma_gaussian = pis_threshold / 2.0; // Sigma for vote weighting
 
     // --- Calculate Geodesic Distance Threshold for Filtering ---
     float bbox_diagonal = mesh->getBoundingBoxDiagonal();
-    float estimated_max_geo_dist = bbox_diagonal * 0.5f; // Estimate max geo dist (e.g., 50% of diagonal)
-    float dmin_threshold = estimated_max_geo_dist / 5.0f; // 1/5th of estimated max
+    float estimated_max_geo_dist = bbox_diagonal * 0.5f;
+    float dmin_threshold = estimated_max_geo_dist / 5.0f;
     std::cout << "Bounding Box Diagonal: " << bbox_diagonal << std::endl;
     std::cout << "Estimated Max Geodesic Distance: " << estimated_max_geo_dist << std::endl;
     std::cout << "Geodesic Distance Filter Threshold (d_min): " << dmin_threshold << std::endl;
-    // --- End Threshold Calculation ---
 
-	std::vector<double> face_votes(mesh->tris.size(), 0.0);
-	int pair_count = 0;
-    int pairs_filtered = 0; // Count filtered pairs
+    // --- Precompute Geodesic Distances from all FPS samples ---
+    std::cout << "Precomputing geodesic distances from " << numFpsSamples << " FPS points..." << std::endl;
+    std::vector<float*> all_fps_distances(numFpsSamples, nullptr);
+    int N = mesh->verts.size();
+    bool precomputation_ok = true;
+    for (int s = 0; s < numFpsSamples; ++s) {
+        int source_vertex = fps_samples[s];
+        all_fps_distances[s] = mesh->computeGeodesicDistances(source_vertex, N);
+        if (!all_fps_distances[s]) {
+            std::cerr << "Error: Failed to compute geodesic distances from FPS sample " << source_vertex << std::endl;
+            precomputation_ok = false;
+            // Clean up already allocated arrays before breaking
+            for(int k=0; k<s; ++k) delete[] all_fps_distances[k];
+            all_fps_distances.clear();
+            break;
+        }
+    }
+    if (!precomputation_ok) {
+         std::cerr << "Aborting symmetry computation due to geodesic precomputation failure." << std::endl;
+         return nullptr;
+    }
+    std::cout << "Geodesic precomputation complete." << std::endl;
+    // --- End Precomputation ---
 
-	std::cout << "Processing " << (fps_samples.size() * (fps_samples.size() - 1) / 2) << " candidate pairs..." << std::endl;
 
-	// Iterate through unique pairs from FPS samples
+    std::vector<double> face_votes(mesh->tris.size(), 0.0);
+    int pair_count = 0;
+    int pairs_filtered = 0;
 
-	for (size_t i = 0; i < fps_samples.size();++i){
-		for(size_t j = i + 1; j<fps_samples.size();++j){
-			int p = fps_samples[i];
-			int q = fps_samples[j];
+    std::cout << "Processing " << (numFpsSamples * (numFpsSamples - 1) / 2) << " candidate pairs..." << std::endl;
 
-			pair_count++;
+    // Iterate through unique pairs from FPS samples
+    for (size_t i = 0; i < numFpsSamples; ++i){
+        for(size_t j = i + 1; j < numFpsSamples; ++j){
+            int p = fps_samples[i];
+            int q = fps_samples[j];
 
-			if (pair_count % 10 == 0) { // Print progress
-				std::cout << "Processing pair " << pair_count << " (" << p << ", " << q << ")" << std::endl;
-				
-			}
+            pair_count++;
 
-            // --- Optional Filtering ---
-            // Filter pairs that are too close geodesically
-            // Note: computeGeodesicDistances computes distances from p to ALL vertices
-			int N = mesh->verts.size(); // Number of vertices in the mesh
-            float* dist_p_raw = mesh->computeGeodesicDistances(p, N);
+            if (pair_count % 10 == 0) {
+                std::cout << "Processing pair " << pair_count << " (" << p << ", " << q << ")" << std::endl;
+            }
+
+            // --- Use Precomputed Distances for Filtering ---
+            float* dist_p_raw = all_fps_distances[i]; // Get precomputed distances from p
+            // float* dist_q_raw = all_fps_distances[j]; // Get precomputed distances from q (needed later for D_qp)
+
+            // Should not be null if precomputation check passed, but check anyway
             if (!dist_p_raw) {
-                 std::cerr << "Warning: Failed to compute geodesic distances from " << p << ". Skipping pair." << std::endl;
+                 std::cerr << "Internal Error: Missing precomputed distance for " << p << ". Skipping pair." << std::endl;
                  continue;
             }
 
-            float geo_dist_pq = dist_p_raw[q];
-            delete[] dist_p_raw; // Free memory immediately after use
+            float geo_dist_pq = dist_p_raw[q]; // Look up distance p->q
 
-            if (geo_dist_pq == FLT_MAX) { // Check for unreachability
+            // --- Remove the redundant Dijkstra call and delete[] ---
+            // float* dist_p_raw = mesh->computeGeodesicDistances(p, N);
+            // if (!dist_p_raw) { ... }
+            // float geo_dist_pq = dist_p_raw[q];
+            // delete[] dist_p_raw; // REMOVED
+            // --- End Removal ---
+
+
+            if (geo_dist_pq == FLT_MAX) {
                  std::cout << "  Skipping pair (" << p << ", " << q << ") - vertices unreachable." << std::endl;
                  pairs_filtered++;
                  continue;
@@ -663,69 +694,80 @@ SoSeparator* computeAndVisualizeSymmetry(Mesh* mesh, Painter* painter){
             if (geo_dist_pq < dmin_threshold) {
                  std::cout << "  Skipping pair (" << p << ", " << q << ") - Geodesic distance " << geo_dist_pq << " < " << dmin_threshold << std::endl;
                  pairs_filtered++;
-                 continue; // Skip this pair
+                 continue;
             }
-            // --- End Optional Filtering ---
+            // --- End Filtering ---
 
-			// 1. Compute fields f_pq and f_qp
-			Eigen::VectorXd f_pq = ph.computePairwiseHarmonic(p, q);
-			Eigen::VectorXd f_qp = ph.computePairwiseHarmonic(q, p);
+            // 1. Compute fields f_pq and f_qp
+            Eigen::VectorXd f_pq = ph.computePairwiseHarmonic(p, q);
+            Eigen::VectorXd f_qp = ph.computePairwiseHarmonic(q, p);
 
-			if (f_pq.size() == 0||f_qp.size() == 0) {
-				std::cerr << "Skipping pair (" << p << ", " << q << ") due to harmonic computation failure." << std::endl;
-				continue; // Skip if computation failed
-			}
+            if (f_pq.size() == 0 || f_qp.size() == 0) {
+                std::cerr << "Skipping pair (" << p << ", " << q << ") due to harmonic computation failure." << std::endl;
+                continue;
+            }
 
-			// 2. Compute R and D descriptors
+            // 2. Compute R and D descriptors
+            // Get the other distance array needed
+            float* dist_q_raw = all_fps_distances[j];
+             if (!dist_q_raw) { // Safety check
+                 std::cerr << "Internal Error: Missing precomputed distance for " << q << ". Skipping pair." << std::endl;
+                 continue;
+             }
 
-			Eigen::VectorXd R_pq = ph.computeRDescriptor(f_pq, numSamplesK);
-			Eigen::VectorXd D_pq = ph.computeDDescriptor(p,q,f_pq, numSamplesK);
-			Eigen::VectorXd R_qp = ph.computeRDescriptor(f_qp, numSamplesK);
-			Eigen::VectorXd D_qp = ph.computeDDescriptor(q,p,f_qp, numSamplesK);
+            Eigen::VectorXd R_pq = ph.computeRDescriptor(f_pq, numSamplesK);
+            // Pass precomputed distances to D descriptor function
+            Eigen::VectorXd D_pq = ph.computeDDescriptor(p, q, f_pq, numSamplesK, dist_p_raw, dist_q_raw);
 
-			// Check if descriptors are valid (e.g., correct size)
-			if (R_pq.size() != numSamplesK || D_pq.size() != numSamplesK ||
-				R_qp.size() != numSamplesK || D_qp.size() != numSamplesK) {
-				std::cerr << " Skipping pair (" << p << ", " << q << ") due to descriptor computation failure." << std::endl;
-				continue; // Skip if computation failed
-			}
-			
-			// 3. Compute PIS score
-			double pis_score = ph.computePIS(R_pq, D_pq, R_qp, D_qp);
+            Eigen::VectorXd R_qp = ph.computeRDescriptor(f_qp, numSamplesK);
+            // Pass precomputed distances (swapped order) to D descriptor function
+            Eigen::VectorXd D_qp = ph.computeDDescriptor(q, p, f_qp, numSamplesK, dist_q_raw, dist_p_raw);
 
-			// 4. Check threshold and vote
 
-			if (pis_score > pis_threshold){
-				std::cout << "  Pair (" << p << ", " << q << ") has high PIS score: " << pis_score << ". Voting..." << std::endl;
-				double vote_weight = std::exp(-std::pow(pis_score - 1.0, 2) / (2.0 * sigma_gaussian * sigma_gaussian));
+            // Check if descriptors are valid
+            if (R_pq.size() != numSamplesK || D_pq.size() != numSamplesK ||
+                R_qp.size() != numSamplesK || D_qp.size() != numSamplesK) {
+                std::cerr << " Skipping pair (" << p << ", " << q << ") due to descriptor computation failure." << std::endl;
+                continue;
+            }
 
-				// Find midpoint iso-curve (isoValue = 0.5)
-				double mid_isoValue = 0.5;
+            // 3. Compute PIS score
+            double pis_score = ph.computePIS(R_pq, D_pq, R_qp, D_qp);
 
-				// Assuming extractIsoCurveSegments exists and returns segments
-				std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> mid_segments = ph.extractIsoCurveSegments(f_pq, mid_isoValue);
+            // 4. Check threshold and vote
+            if (pis_score > pis_threshold){
+                // ... (voting logic remains the same) ...
+                std::cout << "  Pair (" << p << ", " << q << ") has high PIS score: " << pis_score << ". Voting..." << std::endl;
+                double vote_weight = std::exp(-std::pow(pis_score - 1.0, 2) / (2.0 * sigma_gaussian * sigma_gaussian));
+                double mid_isoValue = 0.5;
+                std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> mid_segments = ph.extractIsoCurveSegments(f_pq, mid_isoValue);
+                for (const auto& segment : mid_segments) {
+                    Eigen::Vector3d segment_midpoint = (segment.first + segment.second) * 0.5;
+                    int closest_face_idx = mesh->findClosestFace(segment_midpoint);
+                    if (closest_face_idx != -1) {
+                        face_votes[closest_face_idx] += vote_weight;
+                    }
+                }
+            }
+        } // End inner loop (j)
+    } // End outer loop (i)
 
-				// Find faces intersected by the midpoint curve segments
-				for (const auto& segment : mid_segments) {
-					// Find the face closest to the midpoint of the segment.
-					Eigen::Vector3d segment_midpoint = (segment.first + segment.second) * 0.5;
+    std::cout << "Finished processing pairs. Filtered out " << pairs_filtered << " pairs based on geodesic distance." << std::endl;
 
-					 // Use the robust findClosestFace function from Mesh.cpp
-					int closest_face_idx = mesh->findClosestFace(segment_midpoint);
+    // --- Clean up precomputed distance arrays ---
+    std::cout << "Cleaning up precomputed distances..." << std::endl;
+    for (float* dist_array : all_fps_distances) {
+        if (dist_array) {
+            delete[] dist_array;
+        }
+    }
+    all_fps_distances.clear();
+    std::cout << "Cleanup complete." << std::endl;
+    // --- End Cleanup ---
 
-					if (closest_face_idx != -1) {
-						face_votes[closest_face_idx] += vote_weight; // Add weighted vote
-					} else {
-						// Optional: Handle case where no closest face was found (e.g., mesh has no faces)
-						// std::cerr << "Warning: Could not find closest face for a segment midpoint." << std::endl;
-					}
-				}
-			}
-		}
-	}
-	std::cout << "Finished processing pairs. Filtered out " << pairs_filtered << " pairs based on geodesic distance." << std::endl;
 
     // --- Extract and Visualize Symmetry Axis/Regions ---
+    // ... (visualization logic remains the same) ...
     std::cout << "Analyzing votes..." << std::endl;
     double max_vote = 0.0;
     for (double vote : face_votes) {
@@ -735,19 +777,17 @@ SoSeparator* computeAndVisualizeSymmetry(Mesh* mesh, Painter* painter){
     }
     std::cout << "Max vote: " << max_vote << std::endl;
 
-    if (max_vote > 1e-6) { // Only visualize if there are significant votes
+    if (max_vote > 1e-6) {
         SoSeparator* symmetryAxisSep = new SoSeparator();
         SoMaterial* axisMat = new SoMaterial();
-        axisMat->diffuseColor.setValue(0.0f, 1.0f, 0.0f); // Green for symmetry axis
+        axisMat->diffuseColor.setValue(0.0f, 1.0f, 0.0f); // Green
         symmetryAxisSep->addChild(axisMat);
         SoCoordinate3* axisCoords = new SoCoordinate3();
         SoIndexedFaceSet* axisFaces = new SoIndexedFaceSet();
-
         std::vector<int> vertex_map(mesh->verts.size(), -1);
         int axis_coord_idx = 0;
         int axis_face_vtx_idx = 0;
-
-        double vote_display_threshold = max_vote * 0.5; // Show faces with >= 50% of max vote
+        double vote_display_threshold = max_vote * 0.5;
 
         for (size_t face_idx = 0; face_idx < face_votes.size(); ++face_idx) {
             if (face_votes[face_idx] >= vote_display_threshold) {
@@ -771,7 +811,8 @@ SoSeparator* computeAndVisualizeSymmetry(Mesh* mesh, Painter* painter){
          std::cout << "No significant symmetry votes found." << std::endl;
     }
 
-	return symmetryResult;
+
+    return symmetryResult;
 }
 
 /**

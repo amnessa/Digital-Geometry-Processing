@@ -146,35 +146,23 @@ double PairwiseHarmonics::computeVoronoiArea(int vertexIdx) {
 
 // PairwiseHarmonics public methods implementation
 
-PairwiseHarmonics::PairwiseHarmonics(Mesh* m) : mesh(m), laplacianComputed(false) {}
+PairwiseHarmonics::PairwiseHarmonics(Mesh* m) : mesh(m), laplacianComputed(false), solverComputed(false) {}
 
 bool PairwiseHarmonics::computeCotangentLaplacian() {
     int nVerts = mesh->verts.size();
-    
-    // Initialize the sparse matrix with estimated non-zeros per row
     L.resize(nVerts, nVerts);
-    
-    // List to store triplets (i, j, value) for sparse matrix construction
     std::vector<Eigen::Triplet<double>> triplets;
-    
-    // Estimate number of non-zeros based on average vertex degree
-    triplets.reserve(nVerts * 7);  // Assuming average vertex degree of 7
-    
-    // Diagonal values will be computed as sum of off-diagonal entries
+    triplets.reserve(nVerts * 7);
     std::vector<double> diagonalValues(nVerts, 0.0);
-    
+
     // Process each edge in the mesh
     for (Edge* edge : mesh->edges) {
         int i = edge->v1i;
         int j = edge->v2i;
-        
-        // Skip self-loops if any
         if (i == j) continue;
-        
+
         // Find triangles sharing this edge
         std::vector<int> sharedTriangles;
-        
-        // Find triangles common to both vertices
         for (int triIdxI : mesh->verts[i]->triList) {
             for (int triIdxJ : mesh->verts[j]->triList) {
                 if (triIdxI == triIdxJ) {
@@ -183,10 +171,8 @@ bool PairwiseHarmonics::computeCotangentLaplacian() {
                 }
             }
         }
-        
+
         double cotWeight = 0.0;
-        
-        // For each triangle sharing this edge, compute cotangent weight
         for (int triIdx : sharedTriangles) {
             Triangle* tri = mesh->tris[triIdx];
             
@@ -221,7 +207,6 @@ bool PairwiseHarmonics::computeCotangentLaplacian() {
             double cotTheta = calculateCotangent(vecA, vecB);
             
             // Clamp cotangent values to avoid numerical issues
-            // Extremely large values can cause problems in the solver
             if (std::abs(cotTheta) > 1e6) {
                 cotTheta = (cotTheta > 0) ? 1e6 : -1e6;
             }
@@ -229,44 +214,33 @@ bool PairwiseHarmonics::computeCotangentLaplacian() {
             // Add to total weight
             cotWeight += cotTheta * 0.5;
         }
-        
-        // Handle boundary edges (only one adjacent triangle)
-        if (sharedTriangles.size() == 1) {
-            // For boundary edges, we only have one cotangent value
-            // No modification needed as we're already halving the cotangent
-        }
-        
-        // Skip extremely small weights to maintain sparsity
+
         if (std::abs(cotWeight) > 1e-10) {
-            // Limit extremely large weights to improve conditioning
             if (std::abs(cotWeight) > 1e6) {
                 cotWeight = (cotWeight > 0) ? 1e6 : -1e6;
             }
-            
-            // Negative weight for off-diagonal entries
             triplets.push_back(Eigen::Triplet<double>(i, j, -cotWeight));
             triplets.push_back(Eigen::Triplet<double>(j, i, -cotWeight));
-            
-            // Add contribution to diagonal entries
             diagonalValues[i] += cotWeight;
             diagonalValues[j] += cotWeight;
         }
     }
-    
+
+    // Add Regularization
+    double alpha = 1e-4; // +++ Increased regularization factor +++
+
     // Add diagonal entries
     for (int i = 0; i < nVerts; i++) {
-        // Ensure the diagonal is positive to maintain positive-definiteness
-        // This helps with numerical stability for the LDLT solver
         if (diagonalValues[i] < 1e-10) {
             diagonalValues[i] = 1e-10;
         }
-        triplets.push_back(Eigen::Triplet<double>(i, i, diagonalValues[i]));
+        triplets.push_back(Eigen::Triplet<double>(i, i, diagonalValues[i] + alpha));
     }
-    
+
     // Build the sparse matrix
     L.setFromTriplets(triplets.begin(), triplets.end());
-    
-    // Check for NaN values in the Laplacian matrix
+
+    // Check for NaN/inf values in the Laplacian matrix
     for (int k = 0; k < L.outerSize(); ++k) {
         for (Eigen::SparseMatrix<double>::InnerIterator it(L, k); it; ++it) {
             if (std::isnan(it.value()) || std::isinf(it.value())) {
@@ -276,105 +250,208 @@ bool PairwiseHarmonics::computeCotangentLaplacian() {
             }
         }
     }
-    
-    // Mark as computed
+
     laplacianComputed = true;
-    
+
+    // Re-compute the factorization with the regularized L using SimplicialLDLT
+    std::cout << "Computing LDLT factorization of regularized Laplacian (alpha=" << alpha << ")..." << std::endl; // --- Update message ---
+    laplacianSolver.compute(L); // Compute factorization
+
+    if (laplacianSolver.info() != Eigen::Success) {
+        // --- Update error message ---
+        std::cerr << "ERROR: Failed to compute LDLT factorization of the regularized Laplacian matrix! Solver status: " << laplacianSolver.info() << std::endl;
+        solverComputed = false;
+        return false;
+    } else {
+        std::cout << "LDLT factorization computed successfully." << std::endl; // --- Update message ---
+        solverComputed = true;
+    }
+
     return true;
 }
 
 Eigen::VectorXd PairwiseHarmonics::computePairwiseHarmonic(int vertex_p_idx, int vertex_q_idx) {
-    // Compute Laplacian if not already done
+    // Ensure Laplacian and its factorization are ready
     if (!laplacianComputed) {
+        std::cout << "Laplacian not computed. Computing now..." << std::endl;
         if (!computeCotangentLaplacian()) {
             std::cerr << "Failed to compute Laplacian matrix!" << std::endl;
             return Eigen::VectorXd();
         }
     }
-    
-    int nVerts = mesh->verts.size();
-    
-    // Check if indices are valid
-    if (vertex_p_idx < 0 || vertex_p_idx >= nVerts || 
-        vertex_q_idx < 0 || vertex_q_idx >= nVerts) {
-        std::cerr << "Invalid vertex indices for pairwise harmonic computation!" << std::endl;
-        return Eigen::VectorXd();
+    if (!solverComputed) {
+         std::cerr << "ERROR: Laplacian solver factorization is not available!" << std::endl;
+         return Eigen::VectorXd();
     }
-    
-    // Make a copy of the Laplacian matrix
-    Eigen::SparseMatrix<double> A = L;
-    
-    // Initialize the right-hand side vector b to zeros
-    Eigen::VectorXd b = Eigen::VectorXd::Zero(nVerts);
-    
-    // Ensure the matrix is in compressed mode for faster coefficient access
-    A.makeCompressed();
-    
-    // Modify A and b for boundary conditions
-    
-    // For vertex p: f(p) = 0
-    // Zero out row p
-    for (int k = 0; k < A.outerSize(); ++k) {
-        for (Eigen::SparseMatrix<double>::InnerIterator it(A, k); it; ++it) {
-            if (it.row() == vertex_p_idx) {
-                it.valueRef() = 0.0;
-            }
-        }
-    }
-    // Set diagonal element A(p,p) = 1.0
-    A.coeffRef(vertex_p_idx, vertex_p_idx) = 1.0;
-    // Set b(p) = 0.0 (already zero)
-    
-    // For vertex q: f(q) = 1
-    // Zero out row q
-    for (int k = 0; k < A.outerSize(); ++k) {
-        for (Eigen::SparseMatrix<double>::InnerIterator it(A, k); it; ++it) {
-            if (it.row() == vertex_q_idx) {
-                it.valueRef() = 0.0;
-            }
-        }
-    }
-    // Set diagonal element A(q,q) = 1.0
-    A.coeffRef(vertex_q_idx, vertex_q_idx) = 1.0;
-    // Set b(q) = 1.0
-    b(vertex_q_idx) = 1.0;
-    
-    // Ensure the matrix is in a consistent state after modifications
-    A.prune(1e-10); // Remove extremely small values (helps with numerical stability)
-    
-    // Solve the system Af = b using SparseLU 
-    Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
-    
-    
-    // Compute the decomposition
-    solver.compute(A);
-    
-    if (solver.info() != Eigen::Success) {
-        std::cerr << "Failed to decompose the Laplacian matrix with SparseLU!" << std::endl;
-        return Eigen::VectorXd(); // Return empty vector on failure
 
+    int nVerts = mesh->verts.size();
+
+    // --- Direct Constrained Solve ---
+    Eigen::SparseMatrix<double> L_mod = L; // Start with a copy of the regularized Laplacian L
+    Eigen::VectorXd b_mod = Eigen::VectorXd::Zero(nVerts);
+
+    // --- Enforce f(p) = 0 ---
+    // 1. Adjust b_mod for rows j != p: b_mod(j) -= L(j, p) * 0. No change needed.
+
+    // --- Enforce f(q) = 1 ---
+    // 1. Adjust b_mod for rows j != p, j != q: b_mod(j) -= Original_L(j, q) * 1
+    //    Iterate through column q of the *original* L matrix
+    for (Eigen::SparseMatrix<double>::InnerIterator it(L, vertex_q_idx); it; ++it) {
+        if (it.row() != vertex_p_idx && it.row() != vertex_q_idx) {
+            b_mod(it.row()) -= it.value() * 1.0; // Subtract L(j, q) * 1
+        }
     }
-    
-    // Solve the system with LDLT
-    Eigen::VectorXd f = solver.solve(b);
-    
-    if (solver.info() != Eigen::Success) {
-        std::cerr << "Failed to solve the linear system!" << std::endl;
+
+    // --- Modify L_mod structure ---
+    // Create a list of triplets for the modified matrix. This is often safer than direct coeffRef modification.
+    std::vector<Eigen::Triplet<double>> triplets_mod;
+    triplets_mod.reserve(L.nonZeros()); // Reserve estimate
+
+    for (int k = 0; k < L_mod.outerSize(); ++k) {
+        for (Eigen::SparseMatrix<double>::InnerIterator it(L_mod, k); it; ++it) {
+            int row = it.row();
+            int col = it.col();
+            double value = it.value();
+
+            if (row == vertex_p_idx) { // Row p modifications
+                if (col == vertex_p_idx) {
+                    triplets_mod.push_back(Eigen::Triplet<double>(row, col, 1.0));
+                }
+                // else: omit other elements in row p (effectively zeroing them)
+            } else if (row == vertex_q_idx) { // Row q modifications
+                 if (col == vertex_q_idx) {
+                    triplets_mod.push_back(Eigen::Triplet<double>(row, col, 1.0));
+                }
+                 // else: omit other elements in row q (effectively zeroing them)
+            } else { // Modifications for other rows j != p, j != q
+                if (col == vertex_p_idx || col == vertex_q_idx) {
+                    // Omit elements in columns p and q for rows j != p, j != q
+                } else {
+                    triplets_mod.push_back(Eigen::Triplet<double>(row, col, value));
+                }
+            }
+        }
+    }
+    // Ensure diagonal elements for p and q are present if they weren't in the original sparsity pattern
+    bool p_diag_found = false;
+    bool q_diag_found = false;
+    for(const auto& triplet : triplets_mod) {
+        if(triplet.row() == vertex_p_idx && triplet.col() == vertex_p_idx) p_diag_found = true;
+        if(triplet.row() == vertex_q_idx && triplet.col() == vertex_q_idx) q_diag_found = true;
+    }
+    if (!p_diag_found) triplets_mod.push_back(Eigen::Triplet<double>(vertex_p_idx, vertex_p_idx, 1.0));
+    if (!q_diag_found) triplets_mod.push_back(Eigen::Triplet<double>(vertex_q_idx, vertex_q_idx, 1.0));
+
+
+    L_mod.setFromTriplets(triplets_mod.begin(), triplets_mod.end()); // Rebuild L_mod
+
+    // --- Set b_mod constraints ---
+    b_mod(vertex_p_idx) = 0.0;
+    b_mod(vertex_q_idx) = 1.0;
+
+
+    // --- Solve L_mod * f = b_mod ---
+    Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> modSolver;
+    modSolver.compute(L_mod);
+    if (modSolver.info() != Eigen::Success) {
+        std::cerr << "Failed to factorize modified Laplacian L_mod! Status: " << modSolver.info() << std::endl;
+        // +++ Debug: Print matrix info if factorization fails +++
+        // std::cerr << "L_mod dimensions: " << L_mod.rows() << "x" << L_mod.cols() << ", Nonzeros: " << L_mod.nonZeros() << std::endl;
+        // You could potentially write L_mod and b_mod to a file here for inspection
+        // --- End Debug ---
         return Eigen::VectorXd();
     }
-    
-    // Verify boundary conditions
-    if (std::abs(f(vertex_p_idx)) > 1e-6 || std::abs(f(vertex_q_idx) - 1.0) > 1e-6) {
-        // This warning should ideally disappear after switching to SparseLU
-        std::cerr << "Warning: Boundary conditions still not satisfied precisely after LU solve!" << std::endl;
-        std::cerr << "f(" << vertex_p_idx << ") = " << f(vertex_p_idx) << " (should be 0)" << std::endl;
-        std::cerr << "f(" << vertex_q_idx << ") = " << f(vertex_q_idx) << " (should be 1)" << std::endl;
-        // *not* forcing the values if LU still fails, to better diagnose
-        // f(vertex_p_idx) = 0.0; 
-        // f(vertex_q_idx) = 1.0;
+
+    Eigen::VectorXd f = modSolver.solve(b_mod);
+    if (modSolver.info() != Eigen::Success) {
+        std::cerr << "Failed to solve system L_mod * f = b_mod! Status: " << modSolver.info() << std::endl;
+        return Eigen::VectorXd();
     }
-    
+
     return f;
+}
+
+Eigen::VectorXd PairwiseHarmonics::computeDDescriptor(int vertex_p_idx, int vertex_q_idx, const Eigen::VectorXd& field, int numSamplesK, const float* dist_p, const float* dist_q) {
+    Eigen::VectorXd D_descriptor = Eigen::VectorXd::Zero(numSamplesK);
+    int N = mesh->verts.size();
+
+    // --- Check if precomputed distances are provided ---
+    if (!dist_p || !dist_q) {
+        std::cerr << "Error in computeDDescriptor: Precomputed distance arrays are null." << std::endl;
+        return D_descriptor; // Return zero vector
+    }
+    // --- End Check ---
+
+    // Sample K iso-values between 0 and 1
+    for (int k = 0; k < numSamplesK; ++k) {
+        double isoValue = (double)(k + 1) / (numSamplesK + 1);
+        double totalDistanceSum = 0.0;
+        int intersectionCount = 0; // Count intersection points for averaging
+
+        // Iterate through each triangle to find intersections for this isoValue
+        for (const auto& tri : mesh->tris) {
+            int v1i = tri->v1i;
+            int v2i = tri->v2i;
+            int v3i = tri->v3i;
+
+            double val1 = field(v1i);
+            double val2 = field(v2i);
+            double val3 = field(v3i);
+
+            // Helper lambda to process an edge intersection
+            auto processIntersection = [&](int ui, int vi, double val_u, double val_v) {
+                // Avoid division by zero or cases where edge is nearly flat w.r.t field
+                if (std::abs(val_u - val_v) > 1e-9) {
+                    double t = (isoValue - val_u) / (val_v - val_u);
+
+                    // Clamp t to [0, 1] for robustness
+                    t = std::max(0.0, std::min(1.0, t));
+
+                    // Get precomputed geodesic distances for edge endpoints using the passed arrays
+                    double d_up = dist_p[ui];
+                    double d_vp = dist_p[vi];
+                    double d_uq = dist_q[ui];
+                    double d_vq = dist_q[vi];
+
+                    // Check for infinite distances (unreachable vertices)
+                    if (std::isinf(d_up) || std::isinf(d_vp) || std::isinf(d_uq) || std::isinf(d_vq)) {
+                        return; // Skip this intersection if endpoints are unreachable from p or q
+                    }
+
+                    // Interpolate geodesic distances to the intersection point x
+                    double d_xp = (1.0 - t) * d_up + t * d_vp;
+                    double d_xq = (1.0 - t) * d_uq + t * d_vq;
+
+                    totalDistanceSum += (d_xp + d_xq);
+                    intersectionCount++;
+                }
+            };
+
+            // Check edge 1-2
+            if ((val1 < isoValue && val2 > isoValue) || (val1 > isoValue && val2 < isoValue)) {
+                processIntersection(v1i, v2i, val1, val2);
+            }
+            // Check edge 2-3
+            if ((val2 < isoValue && val3 > isoValue) || (val2 > isoValue && val3 < isoValue)) {
+                processIntersection(v2i, v3i, val2, val3);
+            }
+            // Check edge 3-1
+            if ((val3 < isoValue && val1 > isoValue) || (val3 > isoValue && val1 < isoValue)) {
+                processIntersection(v3i, v1i, val3, val1);
+            }
+        } // End triangle loop
+
+        // Calculate average distance sum for this iso-value
+        // Each segment contributes two points, so divide by count/2 (or multiply sum by 2/count)
+        if (intersectionCount > 0) {
+            D_descriptor(k) = 2.0 * totalDistanceSum / intersectionCount;
+        } else {
+            D_descriptor(k) = 0.0; // Or handle as error/special value
+        }
+
+    } // End iso-value loop
+
+    return D_descriptor;
 }
 
 SoSeparator* PairwiseHarmonics::visualizeHarmonicField(const Eigen::VectorXd& field, Painter* painter) {
@@ -542,123 +619,6 @@ Eigen::VectorXd PairwiseHarmonics::computeRDescriptor(const Eigen::VectorXd& fie
     }
     
     return R;
-}
-
-Eigen::VectorXd PairwiseHarmonics::computeDDescriptor(int vertex_p_idx, int vertex_q_idx, const Eigen::VectorXd& field, int numSamplesK) {
- 
-    Eigen::VectorXd D(numSamplesK);
-    D.setZero(); // Initialize descriptor to zeros
-    int N = mesh->verts.size();
-
-    // --- Precompute Geodesic Distances ---
-    std::cout << "Precomputing geodesic distances from p=" << vertex_p_idx << "..." << std::endl;
-    int numVerts_p;
-    float* dist_p_raw = mesh->computeGeodesicDistances(vertex_p_idx, numVerts_p);
-    if (!dist_p_raw || numVerts_p != N) {
-        std::cerr << "Error computing distances from p!" << std::endl;
-        if (dist_p_raw) delete[] dist_p_raw;
-        return D; // Retrun zero vector on error
-
-    }
-
-    // Convert to Eigen::VectorXd for easier access (optional, but convenient)
-    Eigen::VectorXd dist_p(N);
-    for(int i=0;i<N;++i) dist_p(i) = (dist_p_raw[i] == FLT_MAX) ? std::numeric_limits<double>::infinity() : static_cast<double>(dist_p_raw[i]);
-
-
-    std::cout << " Precomputing geodesic distance from q=" << vertex_q_idx << "..." << std::endl;
-    int numVerts_q;
-    float* dist_q_raw = mesh->computeGeodesicDistances(vertex_q_idx, numVerts_q);
-    if (!dist_q_raw || numVerts_q != N) {
-        std::cerr << "Error computing distances from q!" << std::endl;
-        if (dist_q_raw) delete[] dist_q_raw;
-        return D; // Return zero vector on error
-    }
-    Eigen::VectorXd dist_q(N);
-    for(int i=0;i<N;++i) dist_q(i) = (dist_q_raw[i] == FLT_MAX) ? std::numeric_limits<double>::infinity() : static_cast<double>(dist_q_raw[i]);
-
-    std::cout << " Geodesic distances precomputed." << std::endl;
-
-    // --- End Precompute Geodesic Distances ---
-
-    for (int k = 0; k< numSamplesK; ++k){
-        double isoValue = static_cast<double>(k + 1) / (numSamplesK + 1);
-        double totalDistanceSum = 0.0;
-        int intersectionCount = 0;
-
-        // Iterate through each triangle to find intersections for this isoValue
-        for (const auto& tri: mesh -> tris){
-            int v1i = tri->v1i;
-            int v2i = tri->v2i;
-            int v3i = tri->v3i;
-
-            double val1 = field(v1i);
-            double val2 = field(v2i);
-            double val3 = field(v3i);
-
-            // Helper lambda to process an edge intersection
-            auto processIntersection = [&](int ui, int vi, double val_u, double val_v) {
-                if (std::abs(val_u - val_v)> 1e-9) { // Avoid division by zero
-                    double t = (isoValue - val_u) / (val_v - val_u);
-
-                    // Get precomputed geodesic distances for edge endpoints
-                    double d_up = dist_p(ui);
-                    double d_vp = dist_p(vi);
-                    double d_uq = dist_q(ui);
-                    double d_vq = dist_q(vi);
-
-                    // Check for infinite distances (unreachable vertices)
-                    if (std::isinf(d_up) || std::isinf(d_vp) || std::isinf(d_uq) || std::isinf(d_vq)) {
-                        // Skip this intersection if endpoints are unreachable from p or q
-                        // Or handle differently (e.g., assign a large penalty)
-                        return;
-                        
-                    }
-                    // Interpolate geodesic distances to the intersection point x
-                    // Note: If the intersection point x coincides with p (e.g., t=0 and u=p),
-                    // then d_xp = (1-0)*dist_p(p) + 0*dist_p(v) = 0, as dist_p(p) is 0.
-                    // Similarly, d_xq = (1-0)*dist_q(p) + 0*dist_q(v) = dist_q(p).
-                    // The contribution becomes 0 + dist_q(p), which is correct.
-                    // A similar argument holds if x coincides with q.
-                    // Therefore, this interpolation implicitly handles endpoints p and q.
-                    double d_xp = (1.0 - t) * d_up + t * d_vp;
-                    double d_xq = (1.0 - t) * d_uq + t * d_vq;
-
-                    totalDistanceSum += (d_xp + d_xq);
-                    intersectionCount++;
-                }
-            };
-
-            // Check edge 1-2
-            if ((val1 < isoValue && val2 > isoValue) || (val1 > isoValue && val2 < isoValue)) {
-                processIntersection(v1i, v2i, val1, val2);
-            }
-            // Check edge 2-3
-            if ((val2 < isoValue && val3 > isoValue) || (val2 > isoValue && val3 < isoValue)) {
-                processIntersection(v2i, v3i, val2, val3);
-            }
-            // Check edge 3-1
-            if ((val3 < isoValue && val1 > isoValue) || (val3 > isoValue && val1 < isoValue)) {
-                processIntersection(v3i, v1i, val3, val1);
-            }
-        } // End triangle loop
-
-        // Calculate average distance for this iso-value
-        if (intersectionCount > 0) {
-            D(k) = totalDistanceSum / static_cast<double>(intersectionCount);
-        } else {
-            // Handle cases where no intersections are found for an iso-value
-            // (e.g., isoValue matches a vertex value exactly, or numerical issues)
-            // Setting to 0 or NaN might be options depending on desired behavior
-            D(k) = 0.0; // Or std::numeric_limits<double>::quiet_NaN();
-            //std::cerr << "Warning: No intersections found for isoValue " << isoValue << std::endl;
-        }
-    } 
-    // Clean up raw distance arrays
-    delete[] dist_p_raw;
-    delete[] dist_q_raw;
-
-    return D;
 }
 
 double PairwiseHarmonics::computePIS(const Eigen::VectorXd& R_pq, const Eigen::VectorXd& D_pq, const Eigen::VectorXd& R_qp, const Eigen::VectorXd& D_qp){
@@ -833,6 +793,27 @@ SoSeparator* testPairwiseHarmonic(Mesh* mesh, int vertex_p_idx, int vertex_q_idx
     }
     std::cout << "Pairwise harmonic computed." << std::endl;
 
+    // +++ Debug: Inspect harmonicField +++
+    if (harmonicField.size() > 0) {
+        double minVal = harmonicField.minCoeff();
+        double maxVal = harmonicField.maxCoeff();
+        double avgVal = harmonicField.mean();
+        std::cout << "  Debug Harmonic Field: Size=" << harmonicField.size()
+                  << ", Min=" << minVal << ", Max=" << maxVal << ", Avg=" << avgVal << std::endl;
+        // Print a few sample values
+        if (harmonicField.size() >= 10) {
+             std::cout << "  Debug Harmonic Field Samples: [0]=" << harmonicField(0)
+                       << ", [N/4]=" << harmonicField(harmonicField.size()/4)
+                       << ", [N/2]=" << harmonicField(harmonicField.size()/2)
+                       << ", [3N/4]=" << harmonicField(harmonicField.size()*3/4)
+                       << ", [N-1]=" << harmonicField(harmonicField.size()-1) << std::endl;
+        }
+    } else {
+         std::cout << "  Debug Harmonic Field: Field is empty!" << std::endl;
+    }
+    // +++ End Debug +++
+
+
     // Visualize the harmonic field
     SoSeparator* fieldVisualization = ph.visualizeHarmonicField(harmonicField, painter);
     result->addChild(fieldVisualization);
@@ -854,9 +835,26 @@ SoSeparator* testPairwiseHarmonic(Mesh* mesh, int vertex_p_idx, int vertex_q_idx
     }
     // --- End R descriptor test ---
 
+    // --- Compute Geodesic Distances needed for D Descriptor ---
+    std::cout << "Precomputing geodesic distances for D descriptor test..." << std::endl;
+    int N = mesh->verts.size();
+    float* dist_p = mesh->computeGeodesicDistances(vertex_p_idx, N);
+    float* dist_q = mesh->computeGeodesicDistances(vertex_q_idx, N);
+
+    if (!dist_p || !dist_q) {
+        std::cerr << "Failed to compute geodesic distances for D descriptor test!" << std::endl;
+        if (dist_p) delete[] dist_p;
+        if (dist_q) delete[] dist_q;
+        return result; // Or handle error appropriately
+    }
+    std::cout << "Geodesic distances computed." << std::endl;
+    // --- End Geodesic Distance Computation ---
+
+
     // --- Test D descriptor ---
     std::cout << "Computing D Descriptor with K=" << numSamplesK << "..." << std::endl;
-    Eigen::VectorXd D_descriptor = ph.computeDDescriptor(vertex_p_idx, vertex_q_idx, harmonicField, numSamplesK);
+    // Pass the computed distance arrays
+    Eigen::VectorXd D_descriptor = ph.computeDDescriptor(vertex_p_idx, vertex_q_idx, harmonicField, numSamplesK, dist_p, dist_q);
 
     if (D_descriptor.size() == numSamplesK) {
         std::cout << "D Descriptor computed successfully." << std::endl;
@@ -864,8 +862,12 @@ SoSeparator* testPairwiseHarmonic(Mesh* mesh, int vertex_p_idx, int vertex_q_idx
     } else {
         std::cerr << "Failed to compute D Descriptor or size mismatch!" << std::endl;
     }
-
     // --- End D descriptor test ---
-    
+
+    // --- Clean up allocated distance arrays ---
+    delete[] dist_p;
+    delete[] dist_q;
+    // --- End Cleanup ---
+
     return result;
 }
