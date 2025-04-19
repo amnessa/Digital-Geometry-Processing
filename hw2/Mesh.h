@@ -179,4 +179,20 @@ public:
      *         Returns a zero vector if the face index is invalid.
      */
     Eigen::Vector3d getFaceCentroid(int face_idx);
+
+	/**
+	 * Helper function to calculate the angle at a specific vertex within a triangle.
+	 * @param tri Pointer to the Triangle.
+	 * @param vertexIdx The index of the vertex within the mesh (not the triangle's local index).
+	 * @return The angle in radians at the specified vertex within the triangle. Returns 0 if invalid.
+	 */
+	double calculateAngleAtVertex(Triangle* tri, int vertexIdx);
+
+	/**
+	 * Computes the normal vector for a given vertex using angle-weighted face normals.
+	 * @param vertexIdx The index of the vertex.
+	 * @return The normalized normal vector as an Eigen::Vector3d.
+	 *         Returns a zero vector if the vertex index is invalid or has no adjacent triangles.
+	 */
+	Eigen::Vector3d compteNormal(int vertexIdx);
 };

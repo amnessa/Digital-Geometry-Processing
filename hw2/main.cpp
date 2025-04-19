@@ -609,7 +609,7 @@ SoSeparator* computeAndVisualizeSymmetry(Mesh* mesh, Painter* painter){
 	std::cout << "Laplacian computed." << std::endl;
 
 	int numSamplesK = 10; // K for R/D descriptors
-	double pis_threshold = 0.7; // PIS threshold for voting
+	double pis_threshold = 0.8; // PIS threshold for voting
 	double sigma_gaussian = pis_threshold / 2.0; // Sigma for vote weighting
 
 

@@ -581,6 +581,123 @@ void Mesh::normalizeCoordinates() {
     printf("Mesh normalized: Scale=%f, Center=(%f,%f,%f)\n", 
            scale, centerX, centerY, centerZ);
 }
+double Mesh::calculateAngleAtVertex(Triangle* tri, int vertexIdx) {
+    int v1i = tri->v1i;
+    int v2i = tri->v2i;
+    int v3i = tri->v3i;
+
+    Vertex *v1 = verts[v1i];
+    Vertex *v2 = verts[v2i];
+    Vertex *v3 = verts[v3i];
+
+    Eigen::Vector3d p1(v1->coords[0], v1->coords[1], v1->coords[2]);
+    Eigen::Vector3d p2(v2->coords[0], v2->coords[1], v2->coords[2]);
+    Eigen::Vector3d p3(v3->coords[0], v3->coords[1], v3->coords[2]);
+
+    Eigen::Vector3d vecA, vecB;
+
+    if (vertexIdx == v1i) {
+        vecA = p2 - p1;
+        vecB = p3 - p1;
+    } else if (vertexIdx == v2i) {
+        vecA = p1 - p2;
+        vecB = p3 - p2;
+    } else if (vertexIdx == v3i) {
+        vecA = p1 - p3;
+        vecB = p2 - p3;
+    } else {
+        // Should not happen if vertexIdx is part of the triangle
+        return 0.0;
+    }
+
+    double normA = vecA.norm();
+    double normB = vecB.norm();
+
+    if (normA < 1e-10 || normB < 1e-10) {
+        return 0.0; // Degenerate case
+    }
+
+    double dot = vecA.dot(vecB);
+    double cosTheta = dot / (normA * normB);
+
+    // Clamp cosTheta to avoid numerical issues with acos
+    cosTheta = std::max(-1.0, std::min(1.0, cosTheta));
+
+    return std::acos(cosTheta);
+
+}
+
+Eigen::Vector3d Mesh::compteNormal(int vertexIdx) {
+
+    if(vertexIdx < 0 || vertexIdx >= verts.size()) {
+        std::cerr << "Error: Invalid vertex index in computeNormal: " << vertexIdx << std::endl;
+        return Eigen::Vector3d::Zero();
+    
+    }
+    Vertex* v = verts[vertexIdx];
+    Eigen::Vector3d accumulatedNormal = Eigen::Vector3d::Zero();
+    double totalAngle = 0.0; // Keep track for potential normalization issues, though not strictly needed for direction
+
+    if (v->triList.empty()) {
+         // Handle isolated vertex case (optional: return default normal like Y-up?)
+         std::cerr << "Warning: Vertex " << vertexIdx << " has no adjacent triangles. Cannot compute normal." << std::endl;
+         return Eigen::Vector3d(0, 1, 0); // Or Zero()
+    }
+
+
+    for (int triIdx : v->triList) {
+        if (triIdx < 0 || triIdx >= tris.size()) continue; // Safety check
+
+        Triangle* tri = tris[triIdx];
+        Vertex* v1 = verts[tri->v1i];
+        Vertex* v2 = verts[tri->v2i];
+        Vertex* v3 = verts[tri->v3i];
+
+        Eigen::Vector3d p1(v1->coords[0], v1->coords[1], v1->coords[2]);
+        Eigen::Vector3d p2(v2->coords[0], v2->coords[1], v2->coords[2]);
+        Eigen::Vector3d p3(v3->coords[0], v3->coords[1], v3->coords[2]);
+
+        // Calculate face normal (counter-clockwise order assumed for OFF files)
+        Eigen::Vector3d edge1 = p2 - p1;
+        Eigen::Vector3d edge2 = p3 - p1;
+        Eigen::Vector3d faceNormal = edge1.cross(edge2);
+
+        // Calculate angle at the vertex for this triangle
+        double angle = calculateAngleAtVertex(tri, vertexIdx);
+
+        // Check for degenerate triangles/normals or zero angles
+        if (faceNormal.squaredNorm() > 1e-12 && angle > 1e-6) {
+             accumulatedNormal += faceNormal.normalized() * angle; // Weight face normal by angle
+             totalAngle += angle; // Optional: track total angle
+        } else {
+             // Optionally handle degenerate face normal or zero angle contribution
+             // std::cerr << "Warning: Degenerate face or zero angle for vertex " << vertexIdx << " in triangle " << triIdx << std::endl;
+        }
+    }
+
+    // Normalize the accumulated normal
+    if (accumulatedNormal.squaredNorm() > 1e-12) {
+        return accumulatedNormal.normalized();
+    } else {
+        // Handle cases where accumulation resulted in zero vector (e.g., highly symmetric configurations or all degenerate faces)
+        // Fallback: Simple average of face normals (less robust) or default normal
+        std::cerr << "Warning: Could not compute robust normal for vertex " << vertexIdx << ". Returning default normal." << std::endl;
+        // As a simple fallback, compute non-weighted average if needed, or return default
+        Eigen::Vector3d fallbackNormal = Eigen::Vector3d::Zero();
+         for (int triIdx : v->triList) {
+             if (triIdx < 0 || triIdx >= tris.size()) continue;
+             Triangle* tri = tris[triIdx];
+             Vertex* v1 = verts[tri->v1i]; Vertex* v2 = verts[tri->v2i]; Vertex* v3 = verts[tri->v3i];
+             Eigen::Vector3d p1(v1->coords[0], v1->coords[1], v1->coords[2]);
+             Eigen::Vector3d p2(v2->coords[0], v2->coords[1], v2->coords[2]);
+             Eigen::Vector3d p3(v3->coords[0], v3->coords[1], v3->coords[2]);
+             Eigen::Vector3d faceNormal = (p2 - p1).cross(p3 - p1);
+             if (faceNormal.squaredNorm() > 1e-12) fallbackNormal += faceNormal.normalized();
+         }
+         if (fallbackNormal.squaredNorm() > 1e-12) return fallbackNormal.normalized();
+         else return Eigen::Vector3d(0, 1, 0); // Final fallback: Y-up
+    }
+}
 
 /**
  * Computes the geometric centroid of a given face (triangle).
@@ -604,3 +721,4 @@ Eigen::Vector3d Mesh::getFaceCentroid(int face_idx) {
 
     return (p1+p2 +p3)/3.0; // Return centroid
 }
+

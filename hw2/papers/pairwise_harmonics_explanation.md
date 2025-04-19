@@ -43,7 +43,7 @@ The paper demonstrates the utility of these pairwise descriptors in three applic
      * Reject pairs if ζpq​ is above a threshold ϵ.  
   5. **Voting**: For each surviving candidate pair (p,q):  
      * Boost the score using a Gaussian: ζpq′​=e−ζpq2​/(2τ2).  
-     * Determine the *symmetry axis* curve associated with the pair (method from \[36\]).  
+     * Determine the *symmetry axis* curve associated with the pair (method from [36]).  
      * Let the pair *vote* for the faces the axis passes through, with the score ζpq′​.  
   6. **Extract Axes**: Accumulate votes on mesh faces. Use a greedy algorithm to iteratively select axes based on the average votes of the faces they pass through, avoiding intersecting axes.  
 * **Pseudocode**: The logic follows the steps described above (Sampling \-\> Filtering \-\> Harmonics/Descriptors \-\> PIS Score \-\> Voting \-\> Axis Extraction).

@@ -110,14 +110,14 @@ double PairwiseHarmonics::computeVoronoiArea(int vertexIdx) {
         
         // Compute angles
         double angle = calculateAngle(e1, e2);
-        
+        double angle_v2 = calculateAngle(v3-v2, v1-v2); // Angle at v2
+        double angle_v3 = calculateAngle(v1-v3, v2-v3); // Angle at v3
+
         // Compute triangle area
         double triangleArea = computeTriangleArea(v1, v2, v3);
         
         // For obtuse triangles, use special case handling
-        if (angle > M_PI/2 || 
-            calculateAngle(v2-v3, v1-v3) > M_PI/2 || 
-            calculateAngle(v3-v2, v1-v2) > M_PI/2) {
+        if (angle > M_PI / 2.0 || angle_v2 > M_PI / 2.0 || angle_v3 > M_PI / 2.0) {
             // Obtuse triangle - use fractional area
             if (angle > M_PI/2) {
                 // Angle at vertexIdx is obtuse
