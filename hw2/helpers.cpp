@@ -431,7 +431,11 @@ SoSeparator* PairwiseHarmonics::visualizeHarmonicField(const Eigen::VectorXd& fi
 
 double PairwiseHarmonics::computeIsoCurveLength(const Eigen::VectorXd& field, double isoValue){
     double totalLength = 0.0;
+    double tolerance = 1e-9; // Tolerance for checking equality with isoValue
 
+
+    // Part 1: Handle segments crossing *through* triangles
+    // This part find intersection points for edges strictly crossed by isoValue
     // Iterate through each triangle
     for (const auto& tri : mesh->tris){
         int v1i = tri->v1i;
@@ -453,26 +457,34 @@ double PairwiseHarmonics::computeIsoCurveLength(const Eigen::VectorXd& field, do
         std::vector<Eigen::Vector3d> intersectionPoints;
 
         // Check edge 1-2
-
+        // Only ad intersection if isoValue is strictly between val1 and val2
         if((val1 < isoValue && val2 > isoValue) || (val1 > isoValue && val2 < isoValue)){
-            if(std::abs(val1-val2) > 1e-9){ // Avoid division by zero
+            if(std::abs(val1-val2) > tolerance){ // Avoid division by zero
                 double t = (isoValue - val1) / (val2 - val1);
+                // Clamp t to [0, 1] for robustness, although it should be if condition is met
+                t = std::max(0.0, std::min(1.0, t));
                 intersectionPoints.push_back(p1 + t * (p2 - p1));
                 
             }
+            // If abs(val1-val2) <= tolerance, but they are on opposite sides,
+            // it implies one or both are very close to isoValue.
+            // The edge case (Part 2) might handle edges exactly on isoValue.
         }
 
         // Check edge 2-3
         if ((val2 < isoValue && val3 > isoValue) || (val2 > isoValue && val3 < isoValue)) {
-            if (std::abs(val2 - val3) > 1e-9) {
+            if (std::abs(val2 - val3) > tolerance) {
                double t = (isoValue - val2) / (val3 - val2);
+
+               t = std::max(0.0, std::min(1.0, t));
                intersectionPoints.push_back(p2 + t * (p3 - p2));
            }
        }
        // Check edge 3-1
        if ((val3 < isoValue && val1 > isoValue) || (val3 > isoValue && val1 < isoValue)) {
-            if (std::abs(val3 - val1) > 1e-9) {
-               double t = (isoValue - val3) / (p1 - p3).norm(); // Corrected interpolation
+            if (std::abs(val3 - val1) > tolerance) {
+               double t = (isoValue - val3) / (val1 - val3); // Corrected interpolation
+               t = std::max(0.0, std::min(1.0, t)); // Clamp t to [0, 1]
                intersectionPoints.push_back(p3 + t * (p1 - p3));
            }
         }
@@ -483,10 +495,39 @@ double PairwiseHarmonics::computeIsoCurveLength(const Eigen::VectorXd& field, do
             totalLength += (intersectionPoints[0] - intersectionPoints[1]).norm();
         
         }
-        // Handle cases with more intersections if necessary (e.g., iso-value passes through a vertex)
-        // For simplicity, we only handle the standard case of crossing two edges here.
+        // Cases where size is 0, 1, or 3 (e.g., isoValue passes exactly through a vertex)
+        // are not explicitly handled by this part.
+        // Part 2 handles edges lying exactly on the contour.
 
     }
+    // Part 2: Handle edges lying exactly on the isocontour
+    // Iterate through unique edges to avoid double counting.
+
+    std::vector<bool> edgeProcessed(mesh->edges.size(), false); // Keep track of processed edges
+    for (size_t edgeIdx = 0; edgeIdx < mesh->edges.size(); ++edgeIdx) {
+        if (edgeProcessed[edgeIdx]) continue; // Skip if already processed
+
+        Edge* edge = mesh->edges[edgeIdx];
+        int v1i = edge->v1i;
+        int v2i = edge->v2i;
+
+        double val1 = field(v1i);
+        double val2 = field(v2i);
+
+        // Check if both vertices are (close enough to ) isoValue
+        if (std::abs(val1 - isoValue) < tolerance && std::abs(val2 - isoValue) < tolerance) {
+            const SbVec3f& p1_coords = mesh->verts[v1i]->coords;
+            const SbVec3f& p2_coords = mesh->verts[v2i]->coords;
+            Eigen::Vector3d p1(p1_coords[0], p1_coords[1], p1_coords[2]);
+            Eigen::Vector3d p2(p2_coords[0], p2_coords[1], p2_coords[2]);
+
+            totalLength += (p1 - p2).norm(); // Add the length of the edge
+            // Mark edge as processed (optional if loop structure guarantees single visit)
+            // edgeProcessed[edgeIdx] = true;
+        }
+        
+    }
+
     return totalLength;
 }
 
@@ -572,40 +613,46 @@ Eigen::VectorXd PairwiseHarmonics::computeDDescriptor(int vertex_p_idx, int vert
                         // Or handle differently (e.g., assign a large penalty)
                         return;
                         
-            }
+                    }
                     // Interpolate geodesic distances to the intersection point x
-                    double d_xp = (1.0 - t) * d_up + t * d_vp; 
+                    // Note: If the intersection point x coincides with p (e.g., t=0 and u=p),
+                    // then d_xp = (1-0)*dist_p(p) + 0*dist_p(v) = 0, as dist_p(p) is 0.
+                    // Similarly, d_xq = (1-0)*dist_q(p) + 0*dist_q(v) = dist_q(p).
+                    // The contribution becomes 0 + dist_q(p), which is correct.
+                    // A similar argument holds if x coincides with q.
+                    // Therefore, this interpolation implicitly handles endpoints p and q.
+                    double d_xp = (1.0 - t) * d_up + t * d_vp;
                     double d_xq = (1.0 - t) * d_uq + t * d_vq;
 
                     totalDistanceSum += (d_xp + d_xq);
                     intersectionCount++;
-            }
-    };
+                }
+            };
 
-    // Check edge 1-2
-    if ((val1 < isoValue && val2 > isoValue) || (val1 > isoValue && val2 < isoValue)) {
-        processIntersection(v1i, v2i, val1, val2);
-    }
-    // Check edge 2-3
-    if ((val2 < isoValue && val3 > isoValue) || (val2 > isoValue && val3 < isoValue)) {
-        processIntersection(v2i, v3i, val2, val3);
-    }
-    // Check edge 3-1
-    if ((val3 < isoValue && val1 > isoValue) || (val3 > isoValue && val1 < isoValue)) {
-        processIntersection(v3i, v1i, val3, val1);
-    }
-} // End triangle loop
+            // Check edge 1-2
+            if ((val1 < isoValue && val2 > isoValue) || (val1 > isoValue && val2 < isoValue)) {
+                processIntersection(v1i, v2i, val1, val2);
+            }
+            // Check edge 2-3
+            if ((val2 < isoValue && val3 > isoValue) || (val2 > isoValue && val3 < isoValue)) {
+                processIntersection(v2i, v3i, val2, val3);
+            }
+            // Check edge 3-1
+            if ((val3 < isoValue && val1 > isoValue) || (val3 > isoValue && val1 < isoValue)) {
+                processIntersection(v3i, v1i, val3, val1);
+            }
+        } // End triangle loop
 
         // Calculate average distance for this iso-value
         if (intersectionCount > 0) {
             D(k) = totalDistanceSum / static_cast<double>(intersectionCount);
-} else {
-    // Handle cases where no intersections are found for an iso-value
-    // (e.g., isoValue matches a vertex value exactly, or numerical issues)
-    // Setting to 0 or NaN might be options depending on desired behavior
-    D(k) = 0.0; // Or std::numeric_limits<double>::quiet_NaN();
-    //std::cerr << "Warning: No intersections found for isoValue " << isoValue << std::endl;
-}
+        } else {
+            // Handle cases where no intersections are found for an iso-value
+            // (e.g., isoValue matches a vertex value exactly, or numerical issues)
+            // Setting to 0 or NaN might be options depending on desired behavior
+            D(k) = 0.0; // Or std::numeric_limits<double>::quiet_NaN();
+            //std::cerr << "Warning: No intersections found for isoValue " << isoValue << std::endl;
+        }
     } 
     // Clean up raw distance arrays
     delete[] dist_p_raw;
@@ -650,8 +697,32 @@ double PairwiseHarmonics::computePIS(const Eigen::VectorXd& R_pq, const Eigen::V
     return pis_score;
 }
 
+/**
+ * Helper function to safely interpolate a point on an edge based on isoValue.
+ */
+Eigen::Vector3d interpolateIsoPoint(const Eigen::Vector3d& p_a, const Eigen::Vector3d& p_b,
+                                    double val_a, double val_b, double isoValue, double tolerance) {
+    if (std::abs(val_a - val_b) < tolerance) {
+        // This case should ideally not be reached if called when val_a and val_b are on opposite sides.
+        // Return midpoint as a fallback.
+        return (p_a + p_b) * 0.5;
+    }
+    double t = (isoValue - val_a) / (val_b - val_a);
+    // Clamp t for robustness
+    t = std::max(0.0, std::min(1.0, t));
+    return p_a + t * (p_b - p_a);
+}
+
+/**
+ * Extracts line segments representing the isocontour for a given field and isoValue.
+ * Handles cases where the isocontour passes through vertices.
+ * @param field The scalar field defined on the mesh vertices.
+ * @param isoValue The value for which to extract the isocontour.
+ * @return A vector of pairs, where each pair represents the start and end points of a segment.
+ */
 std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> PairwiseHarmonics::extractIsoCurveSegments(const Eigen::VectorXd& field, double isoValue) {
     std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> segments;
+    double tolerance = 1e-9; // Tolerance for floating point comparisons
 
     // Iterate through each triangle
     for (const auto& tri : mesh->tris) {
@@ -671,36 +742,67 @@ std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> PairwiseHarmonics::extr
         Eigen::Vector3d p2(p2_coords[0], p2_coords[1], p2_coords[2]);
         Eigen::Vector3d p3(p3_coords[0], p3_coords[1], p3_coords[2]);
 
+        // Classify vertices relative to isoValue: 1=above, -1=below, 0=on
+        int state1 = (val1 > isoValue + tolerance) ? 1 : ((val1 < isoValue - tolerance) ? -1 : 0);
+        int state2 = (val2 > isoValue + tolerance) ? 1 : ((val2 < isoValue - tolerance) ? -1 : 0);
+        int state3 = (val3 > isoValue + tolerance) ? 1 : ((val3 < isoValue - tolerance) ? -1 : 0);
+
         std::vector<Eigen::Vector3d> intersectionPoints;
 
-        // Check edge 1-2
-        if ((val1 < isoValue && val2 > isoValue) || (val1 > isoValue && val2 < isoValue)) {
-            if (std::abs(val1 - val2) > 1e-9) {
-                double t = (isoValue - val1) / (val2 - val1);
-                intersectionPoints.push_back(p1 + t * (p2 - p1));
-            }
+        // Check edge 1-2 for intersection
+        if (state1 * state2 < 0) { // If states are opposite sign (-1 and 1)
+            intersectionPoints.push_back(interpolateIsoPoint(p1, p2, val1, val2, isoValue, tolerance));
         }
-        // Check edge 2-3
-        if ((val2 < isoValue && val3 > isoValue) || (val2 > isoValue && val3 < isoValue)) {
-            if (std::abs(val2 - val3) > 1e-9) {
-                double t = (isoValue - val2) / (val3 - val2);
-                intersectionPoints.push_back(p2 + t * (p3 - p2));
-            }
+        // Check edge 2-3 for intersection
+        if (state2 * state3 < 0) {
+            intersectionPoints.push_back(interpolateIsoPoint(p2, p3, val2, val3, isoValue, tolerance));
         }
-        // Check edge 3-1
-        if ((val3 < isoValue && val1 > isoValue) || (val3 > isoValue && val1 < isoValue)) {
-            if (std::abs(val3 - val1) > 1e-9) {
-                double t = (isoValue - val3) / (val1 - val3);
-                intersectionPoints.push_back(p3 + t * (p1 - p3));
-            }
+        // Check edge 3-1 for intersection
+        if (state3 * state1 < 0) {
+            intersectionPoints.push_back(interpolateIsoPoint(p3, p1, val3, val1, isoValue, tolerance));
         }
 
-        // If exactly two intersection points are found in this triangle, add the segment
+        // Check if vertices lie exactly on the isoValue
+        if (state1 == 0) intersectionPoints.push_back(p1);
+        if (state2 == 0) intersectionPoints.push_back(p2);
+        if (state3 == 0) intersectionPoints.push_back(p3);
+
+        // Remove duplicate points (can happen if interpolation hits a vertex exactly)
+        if (intersectionPoints.size() > 1) {
+            std::vector<Eigen::Vector3d> uniquePoints;
+            uniquePoints.push_back(intersectionPoints[0]);
+            for (size_t i = 1; i < intersectionPoints.size(); ++i) {
+                bool duplicate = false;
+                for (const auto& uniquePt : uniquePoints) {
+                    if ((intersectionPoints[i] - uniquePt).squaredNorm() < tolerance * tolerance) {
+                        duplicate = true;
+                        break;
+                    }
+                }
+                if (!duplicate) {
+                    uniquePoints.push_back(intersectionPoints[i]);
+                }
+            }
+            intersectionPoints = uniquePoints;
+        }
+
+
+        // A valid isocontour crossing should result in exactly two unique points on the triangle boundary.
         if (intersectionPoints.size() == 2) {
             segments.push_back({intersectionPoints[0], intersectionPoints[1]});
+        } else if (intersectionPoints.size() > 2) {
+            // This case can occur in complex scenarios (e.g., saddle points exactly at isoValue)
+            // or if the field is noisy. For simplicity, we might ignore these complex cases
+            // or try a more sophisticated triangulation/connection logic if needed.
+            // Current approach: Log a warning and potentially skip.
+            // std::cerr << "Warning: Found " << intersectionPoints.size()
+            //           << " intersection/on-vertex points in triangle. Complex case not fully handled." << std::endl;
+
+            // Simple fallback: connect first two points found (might be incorrect)
+             segments.push_back({intersectionPoints[0], intersectionPoints[1]});
+             // Or connect points pairwise if size is 4 etc. - requires careful topology handling.
         }
-        // Handle cases with more intersections if necessary (e.g., iso-value passes through a vertex)
-        // For simplicity, we only handle the standard case of crossing two edges here.
+        // If size is 0 or 1, no segment is formed within this triangle.
     }
     return segments;
 }

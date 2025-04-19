@@ -9,6 +9,7 @@
 #include <limits>
 #include <cmath>
 #include <Eigen/Dense>
+#include <limits> // Required for std::numeric_limits
 
 // Project headers
 #include "Mesh.h"
@@ -720,5 +721,142 @@ Eigen::Vector3d Mesh::getFaceCentroid(int face_idx) {
     Eigen::Vector3d p3(v3->coords[0], v3->coords[1], v3->coords[2]);
 
     return (p1+p2 +p3)/3.0; // Return centroid
+}
+
+/**
+ * @brief Computes the closest point on a line segment (p1, p2) to a given point.
+ *
+ * @param point The query point.
+ * @param p1 Start point of the segment.
+ * @param p2 End point of the segment.
+ * @return The closest point on the segment [p1, p2] to 'point'.
+ */
+Eigen::Vector3d Mesh::closestPointOnSegment(const Eigen::Vector3d& point, const Eigen::Vector3d& p1, const Eigen::Vector3d& p2) {
+    Eigen::Vector3d segmentDir = p2 - p1;
+    double segmentLenSq = segmentDir.squaredNorm();
+
+    // If segment has zero length, return one of the endpoints
+    if (segmentLenSq < 1e-12) {
+        return p1;
+    }
+
+    // Project point onto the line defined by the segment
+    // t = dot(point - p1, segmentDir) / segmentLenSq
+    double t = (point - p1).dot(segmentDir) / segmentLenSq;
+
+    // Clamp t to [0, 1] to stay within the segment
+    t = std::max(0.0, std::min(1.0, t));
+
+    // Calculate the closest point on the segment
+    return p1 + t * segmentDir;
+}
+
+/**
+ * @brief Checks if a point projected onto the plane of a triangle lies inside the triangle.
+ * Uses barycentric coordinates.
+ *
+ * @param point The point to check (assumed to be on the plane of the triangle).
+ * @param v1 Vertex 1 of the triangle.
+ * @param v2 Vertex 2 of the triangle.
+ * @param v3 Vertex 3 of the triangle.
+ * @param tolerance Tolerance for barycentric coordinate checks.
+ * @return true if the point is inside or on the boundary of the triangle, false otherwise.
+ */
+bool isPointInTriangle(const Eigen::Vector3d& point, const Eigen::Vector3d& v1, const Eigen::Vector3d& v2, const Eigen::Vector3d& v3, double tolerance = 1e-6) {
+    Eigen::Vector3d edge1 = v2 - v1;
+    Eigen::Vector3d edge2 = v3 - v1;
+    Eigen::Vector3d pointVec = point - v1;
+
+    double dot11 = edge1.dot(edge1);
+    double dot12 = edge1.dot(edge2);
+    double dot22 = edge2.dot(edge2);
+    double dotP1 = pointVec.dot(edge1);
+    double dotP2 = pointVec.dot(edge2);
+
+    double invDenom = dot11 * dot22 - dot12 * dot12;
+
+    // Check for degenerate triangle (collinear vertices)
+    if (std::abs(invDenom) < tolerance) {
+        // Fallback: Check if point is close to any segment? For simplicity, return false.
+        return false;
+    }
+
+    invDenom = 1.0 / invDenom;
+    double u = (dot22 * dotP1 - dot12 * dotP2) * invDenom; // Barycentric coord for edge1
+    double v = (dot11 * dotP2 - dot12 * dotP1) * invDenom; // Barycentric coord for edge2
+
+    // Check if point is within the triangle boundaries (including edges/vertices)
+    return (u >= -tolerance) && (v >= -tolerance) && (u + v <= 1.0 + tolerance);
+}
+
+
+int Mesh::findClosestFace(const Eigen::Vector3d& point) {
+    if (tris.empty()) {
+        return -1;
+    }
+
+    double minProjectionDistSq = std::numeric_limits<double>::max();
+    int closestProjectionFaceIdx = -1;
+
+    double minBoundaryDistSq = std::numeric_limits<double>::max();
+    int closestBoundaryFaceIdx = -1;
+
+    for (size_t i = 0; i < tris.size(); ++i) {
+        Triangle* tri = tris[i];
+        Vertex* v1_ptr = verts[tri->v1i];
+        Vertex* v2_ptr = verts[tri->v2i];
+        Vertex* v3_ptr = verts[tri->v3i];
+
+        Eigen::Vector3d v1(v1_ptr->coords[0], v1_ptr->coords[1], v1_ptr->coords[2]);
+        Eigen::Vector3d v2(v2_ptr->coords[0], v2_ptr->coords[1], v2_ptr->coords[2]);
+        Eigen::Vector3d v3(v3_ptr->coords[0], v3_ptr->coords[1], v3_ptr->coords[2]);
+
+        // Calculate face normal and plane distance
+        Eigen::Vector3d edge1 = v2 - v1;
+        Eigen::Vector3d edge2 = v3 - v1;
+        Eigen::Vector3d faceNormal = edge1.cross(edge2);
+        double faceNormalLenSq = faceNormal.squaredNorm();
+
+        if (faceNormalLenSq < 1e-12) continue; // Skip degenerate triangles
+
+        faceNormal /= std::sqrt(faceNormalLenSq); // Normalize
+        double planeDist = faceNormal.dot(point - v1); // Signed distance to plane
+
+        // Project point onto the plane
+        Eigen::Vector3d projectedPoint = point - planeDist * faceNormal;
+
+        // Check if the projected point is inside the triangle
+        if (isPointInTriangle(projectedPoint, v1, v2, v3)) {
+            double distSq = planeDist * planeDist; // Squared distance to the plane (and projected point)
+            if (distSq < minProjectionDistSq) {
+                minProjectionDistSq = distSq;
+                closestProjectionFaceIdx = static_cast<int>(i);
+            }
+        } else {
+            // If projection is outside, find closest point on triangle boundary
+            Eigen::Vector3d cp12 = closestPointOnSegment(point, v1, v2);
+            Eigen::Vector3d cp23 = closestPointOnSegment(point, v2, v3);
+            Eigen::Vector3d cp31 = closestPointOnSegment(point, v3, v1);
+
+            double dSq12 = (point - cp12).squaredNorm();
+            double dSq23 = (point - cp23).squaredNorm();
+            double dSq31 = (point - cp31).squaredNorm();
+
+            double minDistBoundaryCurrentFace = std::min({dSq12, dSq23, dSq31});
+
+            if (minDistBoundaryCurrentFace < minBoundaryDistSq) {
+                minBoundaryDistSq = minDistBoundaryCurrentFace;
+                closestBoundaryFaceIdx = static_cast<int>(i);
+            }
+        }
+    }
+
+    // Prefer faces where the projection landed inside
+    if (closestProjectionFaceIdx != -1) {
+        return closestProjectionFaceIdx;
+    } else {
+        // Otherwise, return the face with the closest boundary point
+        return closestBoundaryFaceIdx;
+    }
 }
 

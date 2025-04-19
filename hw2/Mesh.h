@@ -195,4 +195,33 @@ public:
 	 *         Returns a zero vector if the vertex index is invalid or has no adjacent triangles.
 	 */
 	Eigen::Vector3d compteNormal(int vertexIdx);
+
+	/**
+	 * @brief Finds the index of the mesh face closest to a given 3D point.
+	 *
+	 * It first checks for faces where the point's projection onto the face plane
+	 * lies inside the triangle. If found, it returns the face with the minimum
+	 * projection distance. If not found, it returns the face containing the
+	 * edge or vertex closest to the point.
+	 *
+	 * @param point The query point in 3D space.
+	 * @return The index of the closest face in mesh->tris, or -1 if the mesh has no faces.
+	 */
+	Eigen::Vector3d closestPointOnSegment(const Eigen::Vector3d& point, const Eigen::Vector3d& p1, const Eigen::Vector3d& p2);
+
+	/**
+	 * @brief Finds the index of the mesh face closest to a given 3D point.
+	 *
+	 * It first checks for faces where the point's projection onto the face plane
+	 * lies inside the triangle. If found, it returns the face with the minimum
+	 * projection distance. If not found, it returns the face containing the
+	 * edge or vertex closest to the point.
+	 *
+	 * @param point The query point in 3D space.
+	 * @return The index of the closest face in mesh->tris, or -1 if the mesh has no faces.
+	 */
+
+	 int findClosestFace(const Eigen::Vector3d& point);
+
+	 
 };

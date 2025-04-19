@@ -686,23 +686,14 @@ SoSeparator* computeAndVisualizeSymmetry(Mesh* mesh, Painter* painter){
 				// Find the face closest to the midpoint of the segment.
 				Eigen::Vector3d segment_midpoint = (segment.first + segment.second) * 0.5;
 
-				// You'll need a function in Mesh.cpp to find the closest face index
-				// int closest_face_idx = mesh->findClosestFace(segment_midpoint);
-				int closest_face_idx = -1; // Placeholder - IMPLEMENT findClosestFace
-
-				// Basic placeholder: Iterate faces and find one whose centroid is close
-				double min_dist_sq = std::numeric_limits<double>::max();
-				for(size_t face_idx = 0; face_idx < mesh->tris.size(); ++face_idx) {
-					Eigen::Vector3d centroid = mesh->getFaceCentroid(face_idx); // Assumes Mesh::getFaceCentroid exists
-					double dist_sq = (centroid - segment_midpoint).squaredNorm();
-					if (dist_sq < min_dist_sq) {
-						min_dist_sq = dist_sq;
-						closest_face_idx = face_idx;
-					}
-				}
+				 // Use the robust findClosestFace function from Mesh.cpp
+				int closest_face_idx = mesh->findClosestFace(segment_midpoint);
 
 				if (closest_face_idx != -1) {
 					face_votes[closest_face_idx] += vote_weight; // Add weighted vote
+				} else {
+					// Optional: Handle case where no closest face was found (e.g., mesh has no faces)
+					// std::cerr << "Warning: Could not find closest face for a segment midpoint." << std::endl;
 				}
 			}
 		}
