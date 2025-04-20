@@ -823,7 +823,7 @@ void displayMenu() {
     cout << "1. Compute geodesic path between two vertices" << endl;
     cout << "2. Visualize farthest point sampling" << endl;
     cout << "3. Compute and visualize patches (using mesh 249.off)" << endl;
-    cout << "4. Compute and visualize patches (using mesh 348.off)" << endl;
+    cout << "4. Compute and visualize patches (using mesh Armadillo.off)" << endl;
     cout << "5. Test pairwise harmonics (Phase 1 & 2 Test)" << endl;
     cout << "6. Compute and visualize intrinsic symmetry (Phase 3)" << endl; // New option
     cout << "7. Exit" << endl; // Renumber Exit
@@ -850,7 +850,7 @@ int main(int, char** argv)
 	g_painter = new Painter();
 
 	// Load the mesh
-	string meshPath = "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw1src/man0.off";
+	string meshPath = "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw2/man0.off";
 	cout << "Loading mesh from " << meshPath << "..." << endl;
 	g_mesh->loadOff(const_cast<char*>(meshPath.c_str()));
 	g_mesh->normalizeCoordinates();
@@ -939,13 +939,13 @@ DWORD WINAPI ConsoleInputThread(LPVOID lpParam)
             }
 
             case 3: { // Patching with 249.off
-                string meshPath = "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw1src/249.off";
+                string meshPath = "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw2/249.off";
                 computeAndVisualizePatches(meshPath);
                 break;
             }
 
-            case 4: { // Patching with 348.off
-                string meshPath = "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw1src/348.off";
+            case 4: { // Patching with Armadillo.off
+                string meshPath = "C:/Users/cagopa/Desktop/Digital-Geometry-Processing/hw2/Armadillo.off";
                 computeAndVisualizePatches(meshPath);
                 break;
             }
