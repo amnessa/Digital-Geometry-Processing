@@ -66,7 +66,7 @@ void visualizeFarthestPointSampling(int numSamples);
 void loadNewMesh(const string& meshPath);
 void computeAndVisualizePatches(const string& meshPath);
 void testPairwiseHarmonics();
-SoSeparator* computeAndVisualizeSymmetry(Mesh* mesh, Painter* painter);
+SoSeparator* computeAndVisualizeSymmetry(Mesh* mesh, Painter* painter, double pis_threshold);
 
 /**
  * Load a new mesh and prepare it for visualization
@@ -583,7 +583,7 @@ void testPairwiseHarmonics() {
     g_viewer->viewAll();
 }
 
-SoSeparator* computeAndVisualizeSymmetry(Mesh* mesh, Painter* painter){
+SoSeparator* computeAndVisualizeSymmetry(Mesh* mesh, Painter* painter, double pis_threshold){
     SoSeparator* symmetryResult = new SoSeparator();
 
     // Add mesh visualization
@@ -611,7 +611,6 @@ SoSeparator* computeAndVisualizeSymmetry(Mesh* mesh, Painter* painter){
     std::cout << "Laplacian computed." << std::endl;
 
     int numSamplesK = 10; // K for R/D descriptors
-    double pis_threshold = 0.7; // PIS threshold for voting
     double sigma_gaussian = pis_threshold / 2.0; // Sigma for vote weighting
 
     // --- Calculate Geodesic Distance Threshold for Filtering ---
@@ -957,12 +956,41 @@ DWORD WINAPI ConsoleInputThread(LPVOID lpParam)
 
             case 6: { // Compute and visualize symmetry
                 if (g_mesh && g_painter) {
+                     // --- Get PIS threshold from user ---
+                     double pis_threshold = 0.7; // Default value
+                     std::string input_str;
+                     cout << "Enter PIS threshold (default 0.7, higher means stricter symmetry): ";
+                     // Read the whole line
+                     getline(cin, input_str);
+
+                     // Try to convert to double, use default if empty or invalid
+                     if (!input_str.empty()) {
+                         try {
+                             pis_threshold = std::stod(input_str);
+                             if (pis_threshold <= 0.0 || pis_threshold > 1.0) {
+                                 cout << "Invalid threshold value. Using default 0.7." << endl;
+                                 pis_threshold = 0.7;
+                             }
+                         } catch (const std::invalid_argument& ia) {
+                             cout << "Invalid input. Using default 0.7." << endl;
+                             pis_threshold = 0.7;
+                         } catch (const std::out_of_range& oor) {
+                             cout << "Input out of range. Using default 0.7." << endl;
+                             pis_threshold = 0.7;
+                         }
+                     } else {
+                         cout << "Using default PIS threshold: 0.7" << endl;
+                     }
+                     // --- End PIS threshold input ---
+
+
                      // Clear previous visualization (except base mesh)
                      while (g_root->getNumChildren() > 1) {
                          g_root->removeChild(1);
                      }
                      // Call the function and add the result to the main scene graph
-                     SoSeparator* symmetryViz = computeAndVisualizeSymmetry(g_mesh, g_painter);
+                     // Pass the user-defined or default pis_threshold
+                     SoSeparator* symmetryViz = computeAndVisualizeSymmetry(g_mesh, g_painter, pis_threshold);
                      if (symmetryViz) { // Check if it returned something
                         g_root->addChild(symmetryViz); // Add to the global root
                      }

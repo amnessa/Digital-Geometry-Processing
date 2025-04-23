@@ -1,9 +1,12 @@
 #include <stdio.h>
 #include <iostream>
 #include <vector>
+#include <string> // Add this
 #include <algorithm>
 #include <cfloat>
 #include <utility>
+#include <cmath>    // Add this for std::round, std::max
+#include <iomanip>  // Add this for std::setw, std::fixed, std::setprecision
 
 // Standard C++ headers and Eigen headers BEFORE Windows.h and Coin3D headers
 #include <Eigen/Dense>
@@ -767,14 +770,59 @@ std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> PairwiseHarmonics::extr
     return segments;
 }
 
+/**
+ * Prints a simple text-based histogram for an Eigen vector.
+ * @param descriptor The vector of values to plot.
+ * @param title A title for the histogram.
+ * @param maxBarWidth The maximum width (number of characters) for the longest bar.
+ * @param barChar The character used to draw the bars.
+ */
+void printHistogram(const Eigen::VectorXd& descriptor, const std::string& title, int maxBarWidth = 50, char barChar = '*') {
+    std::cout << "\n--- Histogram: " << title << " ---" << std::endl;
+    if (descriptor.size() == 0) {
+        std::cout << "  (Descriptor is empty)" << std::endl;
+        return;
+    }
+
+    double maxValue = descriptor.maxCoeff();
+
+    // Handle zero, near-zero, or negative max value (though descriptors should be non-negative)
+    if (maxValue <= 1e-9) {
+        std::cout << "  (Max value <= 0, cannot generate proportional histogram)" << std::endl;
+        // Just print values without bars
+        for (int i = 0; i < descriptor.size(); ++i) {
+            std::cout << std::setw(3) << i << ": "
+                      << std::fixed << std::setprecision(4) << std::setw(10) << descriptor(i) << " |" << std::endl;
+        }
+        std::cout << "--------------------------" << std::endl;
+        return;
+    }
+
+    // Print histogram bars
+    for (int i = 0; i < descriptor.size(); ++i) {
+        double value = descriptor(i);
+        // Ensure value is non-negative before scaling (important if descriptors could be negative)
+        value = std::max(0.0, value);
+
+        int barWidth = static_cast<int>(std::round((value / maxValue) * maxBarWidth));
+        barWidth = std::max(0, barWidth); // Ensure non-negative width
+
+        std::cout << std::setw(3) << i << ": "
+                  << std::fixed << std::setprecision(4) << std::setw(10) << value << " |" // Print index and value
+                  << std::string(barWidth, barChar) // Print the bar
+                  << std::endl;
+    }
+    std::cout << "--------------------------" << std::endl;
+}
+
 // Free function implementation
 SoSeparator* testPairwiseHarmonic(Mesh* mesh, int vertex_p_idx, int vertex_q_idx, Painter* painter) {
     // Create a result separator
     SoSeparator* result = new SoSeparator();
-    
+
     // Create the PairwiseHarmonics object
     PairwiseHarmonics ph(mesh);
-    
+
     // Compute the Laplacian
     std::cout << "Computing Cotangent Laplacian..." << std::endl;
     if (!ph.computeCotangentLaplacian()) {
@@ -782,61 +830,27 @@ SoSeparator* testPairwiseHarmonic(Mesh* mesh, int vertex_p_idx, int vertex_q_idx
         return result;
     }
     std::cout << "Laplacian computed." << std::endl;
-    
-    // Compute the pairwise harmonic function
-    std::cout << "Computing Pairwise Harmonic for vertices " << vertex_p_idx << " and " << vertex_q_idx << "..." << std::endl;
-    Eigen::VectorXd harmonicField = ph.computePairwiseHarmonic(vertex_p_idx, vertex_q_idx);
-    
-    if (harmonicField.size() == 0) {
-        std::cerr << "Failed to compute pairwise harmonic!" << std::endl;
+
+    // --- Compute for pair (p, q) ---
+    std::cout << "Computing Pairwise Harmonic for vertices " << vertex_p_idx << " -> " << vertex_q_idx << "..." << std::endl;
+    Eigen::VectorXd harmonicField_pq = ph.computePairwiseHarmonic(vertex_p_idx, vertex_q_idx);
+
+    if (harmonicField_pq.size() == 0) {
+        std::cerr << "Failed to compute pairwise harmonic for (p, q)!" << std::endl;
         return result;
     }
-    std::cout << "Pairwise harmonic computed." << std::endl;
+    std::cout << "Pairwise harmonic (p, q) computed." << std::endl;
 
-    // +++ Debug: Inspect harmonicField +++
-    if (harmonicField.size() > 0) {
-        double minVal = harmonicField.minCoeff();
-        double maxVal = harmonicField.maxCoeff();
-        double avgVal = harmonicField.mean();
-        std::cout << "  Debug Harmonic Field: Size=" << harmonicField.size()
-                  << ", Min=" << minVal << ", Max=" << maxVal << ", Avg=" << avgVal << std::endl;
-        // Print a few sample values
-        if (harmonicField.size() >= 10) {
-             std::cout << "  Debug Harmonic Field Samples: [0]=" << harmonicField(0)
-                       << ", [N/4]=" << harmonicField(harmonicField.size()/4)
-                       << ", [N/2]=" << harmonicField(harmonicField.size()/2)
-                       << ", [3N/4]=" << harmonicField(harmonicField.size()*3/4)
-                       << ", [N-1]=" << harmonicField(harmonicField.size()-1) << std::endl;
-        }
-    } else {
-         std::cout << "  Debug Harmonic Field: Field is empty!" << std::endl;
-    }
-    // +++ End Debug +++
+    // Visualize the harmonic field (p, q)
+    SoSeparator* fieldVisualization_pq = ph.visualizeHarmonicField(harmonicField_pq, painter);
+    result->addChild(fieldVisualization_pq);
 
-
-    // Visualize the harmonic field
-    SoSeparator* fieldVisualization = ph.visualizeHarmonicField(harmonicField, painter);
-    result->addChild(fieldVisualization);
-    
     // Highlight the source and target vertices
     result->addChild(painter->get1PointSep(mesh, vertex_p_idx, 0.0f, 0.0f, 1.0f, 5.0f, false)); // Blue for p (value 0)
     result->addChild(painter->get1PointSep(mesh, vertex_q_idx, 1.0f, 0.0f, 0.0f, 5.0f, false)); // Red for q (value 1)
 
-    // --- Test R descriptor ---
-    int numSamplesK = 10; // Number of samples for R descriptor
-    std::cout << "Computing R Descriptor with K=" << numSamplesK << "..." << std::endl;
-    Eigen::VectorXd R_descriptor = ph.computeRDescriptor(harmonicField, numSamplesK);
-
-    if (R_descriptor.size() ==  numSamplesK) {
-        std::cout << "R Descriptor computed successfully." << std::endl;
-        std::cout << R_descriptor.transpose() << std::endl; // Print the vector horizontally
-    } else {
-        std::cerr << "Failed to compute R Descriptor or size mismatch!" << std::endl;
-    }
-    // --- End R descriptor test ---
-
-    // --- Compute Geodesic Distances needed for D Descriptor ---
-    std::cout << "Precomputing geodesic distances for D descriptor test..." << std::endl;
+    // --- Compute Geodesic Distances needed for D Descriptors ---
+    std::cout << "Precomputing geodesic distances for D descriptors..." << std::endl;
     int N = mesh->verts.size();
     float* dist_p = mesh->computeGeodesicDistances(vertex_p_idx, N);
     float* dist_q = mesh->computeGeodesicDistances(vertex_q_idx, N);
@@ -845,29 +859,96 @@ SoSeparator* testPairwiseHarmonic(Mesh* mesh, int vertex_p_idx, int vertex_q_idx
         std::cerr << "Failed to compute geodesic distances for D descriptor test!" << std::endl;
         if (dist_p) delete[] dist_p;
         if (dist_q) delete[] dist_q;
-        return result; // Or handle error appropriately
+        return result;
     }
     std::cout << "Geodesic distances computed." << std::endl;
     // --- End Geodesic Distance Computation ---
 
-
-    // --- Test D descriptor ---
-    std::cout << "Computing D Descriptor with K=" << numSamplesK << "..." << std::endl;
-    // Pass the computed distance arrays
-    Eigen::VectorXd D_descriptor = ph.computeDDescriptor(vertex_p_idx, vertex_q_idx, harmonicField, numSamplesK, dist_p, dist_q);
-
-    if (D_descriptor.size() == numSamplesK) {
-        std::cout << "D Descriptor computed successfully." << std::endl;
-        std::cout << D_descriptor.transpose() << std::endl; // Print the vector horizontally
+    // --- Compute Descriptors for (p, q) ---
+    int numSamplesK = 10; // Number of samples for descriptors
+    std::cout << "Computing R Descriptor (p, q) with K=" << numSamplesK << "..." << std::endl;
+    Eigen::VectorXd R_pq = ph.computeRDescriptor(harmonicField_pq, numSamplesK);
+    if (R_pq.size() == numSamplesK) {
+        std::cout << "R_pq computed: " << R_pq.transpose() << std::endl;
     } else {
-        std::cerr << "Failed to compute D Descriptor or size mismatch!" << std::endl;
+        std::cerr << "Failed to compute R_pq!" << std::endl;
     }
-    // --- End D descriptor test ---
+
+    std::cout << "Computing D Descriptor (p, q) with K=" << numSamplesK << "..." << std::endl;
+    Eigen::VectorXd D_pq = ph.computeDDescriptor(vertex_p_idx, vertex_q_idx, harmonicField_pq, numSamplesK, dist_p, dist_q);
+    if (D_pq.size() == numSamplesK) {
+        std::cout << "D_pq computed: " << D_pq.transpose() << std::endl;
+    } else {
+        std::cerr << "Failed to compute D_pq!" << std::endl;
+    }
+    // --- End Descriptors for (p, q) ---
+
+
+    // --- Compute for reverse pair (q, p) ---
+    std::cout << "\nComputing Pairwise Harmonic for vertices " << vertex_q_idx << " -> " << vertex_p_idx << "..." << std::endl;
+    Eigen::VectorXd harmonicField_qp = ph.computePairwiseHarmonic(vertex_q_idx, vertex_p_idx);
+
+    if (harmonicField_qp.size() == 0) {
+        std::cerr << "Failed to compute pairwise harmonic for (q, p)!" << std::endl;
+        // Cleanup distances before returning
+        delete[] dist_p;
+        delete[] dist_q;
+        return result;
+    }
+    std::cout << "Pairwise harmonic (q, p) computed." << std::endl;
+
+    // --- Compute Descriptors for (q, p) ---
+    std::cout << "Computing R Descriptor (q, p) with K=" << numSamplesK << "..." << std::endl;
+    Eigen::VectorXd R_qp = ph.computeRDescriptor(harmonicField_qp, numSamplesK);
+    if (R_qp.size() == numSamplesK) {
+        std::cout << "R_qp computed: " << R_qp.transpose() << std::endl;
+    } else {
+        std::cerr << "Failed to compute R_qp!" << std::endl;
+    }
+
+    std::cout << "Computing D Descriptor (q, p) with K=" << numSamplesK << "..." << std::endl;
+    // Note the swapped order of vertices and distance arrays
+    Eigen::VectorXd D_qp = ph.computeDDescriptor(vertex_q_idx, vertex_p_idx, harmonicField_qp, numSamplesK, dist_q, dist_p);
+    if (D_qp.size() == numSamplesK) {
+        std::cout << "D_qp computed: " << D_qp.transpose() << std::endl;
+    } else {
+        std::cerr << "Failed to compute D_qp!" << std::endl;
+    }
+    // --- End Descriptors for (q, p) ---
+
+
+    // --- Compute PIS Score (Optional, but good for context) ---
+    if (R_pq.size() == numSamplesK && D_pq.size() == numSamplesK && R_qp.size() == numSamplesK && D_qp.size() == numSamplesK) {
+        double pis_score = ph.computePIS(R_pq, D_pq, R_qp, D_qp);
+        std::cout << "\nComputed PIS Score for pair (" << vertex_p_idx << ", " << vertex_q_idx << "): " << pis_score << std::endl;
+    } else {
+        std::cout << "\nCould not compute PIS score due to descriptor errors." << std::endl;
+    }
+    // --- End PIS Score ---
+
 
     // --- Clean up allocated distance arrays ---
     delete[] dist_p;
     delete[] dist_q;
+    std::cout << "Cleaned up distance arrays." << std::endl;
     // --- End Cleanup ---
+
+    // --- Print Histograms ---
+    std::cout << "\n--- Descriptor Histograms ---" << std::endl;
+    if (R_pq.size() == numSamplesK) {
+        printHistogram(R_pq, "R_pq (Perimeter p->q)");
+    }
+    if (D_pq.size() == numSamplesK) {
+        printHistogram(D_pq, "D_pq (Distance p->q)");
+    }
+    if (R_qp.size() == numSamplesK) {
+        printHistogram(R_qp, "R_qp (Perimeter q->p)");
+    }
+    if (D_qp.size() == numSamplesK) {
+        printHistogram(D_qp, "D_qp (Distance q->p)");
+    }
+    // --- End Histogram Printing ---
+
 
     return result;
 }
