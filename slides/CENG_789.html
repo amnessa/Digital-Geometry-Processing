@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CENG 789 - Interactive Study Guide</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Chosen Palette: Academic Blue & Warm Gray -->
+    <!-- Application Structure Plan: A single-page application with a fixed sidebar for navigation. This allows for quick, non-linear access to different study topics, which is ideal for exam preparation. The main content area dynamically displays the selected topic. This structure was chosen to provide a focused, dashboard-like experience, enabling students to easily switch between theoretical concepts, interactive examples, and algorithm summaries without losing context. Key interactions include topic switching via the sidebar and hands-on engagement with interactive modules within each topic. -->
+    <!-- Visualization & Content Choices:
+        - Euler's Formula: Goal(Inform/Interact) -> Interactive calculator (HTML/JS) to actively engage with the formula. Justification: Active learning reinforces memory.
+        - Laplacian Smoothing: Goal(Change) -> Chart.js line chart showing iterative smoothing. Justification: Visually demonstrates the core concept and its shrinkage artifact.
+        - Algorithm Steps: Goal(Organize) -> Clickable flow diagrams using HTML/CSS. Justification: Breaks down complex processes into digestible, interactive steps.
+        - Key Concepts: Goal(Inform) -> Card-based layout with concise text and formulas. Justification: Quick, scannable information for review.
+        - Calculations: Goal(Practice) -> Step-by-step walkthroughs of sample problems. Justification: Prepares for exam-style questions.
+        - Library/Method: Chart.js for visualizations on Canvas, Vanilla JS for all interactions.
+    -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc; /* slate-50 */
+        }
+        .content-section {
+            display: none;
+        }
+        .content-section.active {
+            display: block;
+        }
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+            height: 300px;
+            max-height: 400px;
+        }
+        @media (min-width: 768px) {
+            .chart-container {
+                height: 350px;
+            }
+        }
+        .sidebar-link {
+            transition: all 0.2s ease-in-out;
+        }
+        .sidebar-link.active, .sidebar-link:hover {
+            background-color: #e0f2fe; /* sky-100 */
+            color: #0c4a6e; /* sky-900 */
+            transform: translateX(4px);
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+    <div class="flex min-h-screen">
+        <aside class="w-64 bg-white border-r border-slate-200 p-6 fixed h-full">
+            <h1 class="text-xl font-bold text-sky-800 mb-6">CENG 789 Study Guide</h1>
+            <nav class="space-y-2">
+                <a href="#foundations" class="sidebar-link block p-3 rounded-lg font-medium text-slate-600">Foundations & Meshes</a>
+                <a href="#laplacian" class="sidebar-link block p-3 rounded-lg font-medium text-slate-600">The Laplacian Operator</a>
+                <a href="#reconstruction" class="sidebar-link block p-3 rounded-lg font-medium text-slate-600">Surface Reconstruction</a>
+                <a href="#smoothing" class="sidebar-link block p-3 rounded-lg font-medium text-slate-600">Smoothing & Remeshing</a>
+                <a href="#subdivision" class="sidebar-link block p-3 rounded-lg font-medium text-slate-600">Subdivision</a>
+                <a href="#parameterization" class="sidebar-link block p-3 rounded-lg font-medium text-slate-600">Parameterization</a>
+                <a href="#registration" class="sidebar-link block p-3 rounded-lg font-medium text-slate-600">Registration</a>
+                <a href="#deformation" class="sidebar-link block p-3 rounded-lg font-medium text-slate-600">Deformation</a>
+                <a href="#fitting" class="sidebar-link block p-3 rounded-lg font-medium text-slate-600">Fitting & Generation</a>
+                <a href="#calculations" class="sidebar-link block p-3 rounded-lg font-medium text-slate-600">Calculation Practice</a>
+            </nav>
+        </aside>
+
+        <main class="ml-64 flex-1 p-6 lg:p-10">
+            <div id="foundations" class="content-section">
+                <h2 class="text-3xl font-bold text-slate-900 mb-4">Geometric Foundations & Polygon Meshes</h2>
+                <p class="mb-6 text-slate-600">This section covers the fundamental building blocks of digital geometry processing, starting with the properties of polygon meshes and the topological constraints that govern them, most famously Euler's formula. Understanding these concepts is essential for all subsequent topics.</p>
+
+                <div class="grid md:grid-cols-2 gap-8">
+                    <div class="bg-white p-6 rounded-xl shadow-sm">
+                        <h3 class="text-xl font-semibold mb-3 text-sky-800">Euler's Formula Interactive Calculator</h3>
+                        <p class="text-sm text-slate-500 mb-4">For any closed, simple polyhedron (or a genus-0 mesh), the formula $V - E + F = 2$ holds. Enter any two values to calculate the third.</p>
+                        <div class="space-y-3">
+                            <div>
+                                <label for="vertices" class="block text-sm font-medium text-slate-700">Vertices (V)</label>
+                                <input type="number" id="vertices" class="mt-1 block w-full p-2 border border-slate-300 rounded-md shadow-sm focus:ring-sky-500 focus:border-sky-500">
+                            </div>
+                            <div>
+                                <label for="edges" class="block text-sm font-medium text-slate-700">Edges (E)</label>
+                                <input type="number" id="edges" class="mt-1 block w-full p-2 border border-slate-300 rounded-md shadow-sm focus:ring-sky-500 focus:border-sky-500">
+                            </div>
+                            <div>
+                                <label for="faces" class="block text-sm font-medium text-slate-700">Faces (F)</label>
+                                <input type="number" id="faces" class="mt-1 block w-full p-2 border border-slate-300 rounded-md shadow-sm focus:ring-sky-500 focus:border-sky-500">
+                            </div>
+                        </div>
+                        <div class="mt-4 flex space-x-2">
+                            <button id="calculateEuler" class="w-full bg-sky-600 text-white py-2 px-4 rounded-md hover:bg-sky-700 transition">Calculate</button>
+                            <button id="resetEuler" class="w-full bg-slate-200 text-slate-700 py-2 px-4 rounded-md hover:bg-slate-300 transition">Reset</button>
+                        </div>
+                        <p id="eulerResult" class="mt-4 text-center font-medium text-sky-700"></p>
+                    </div>
+
+                    <div class="bg-white p-6 rounded-xl shadow-sm">
+                        <h3 class="text-xl font-semibold mb-3 text-sky-800">Polygon Triangulation</h3>
+                        <p class="text-sm text-slate-500 mb-4">Any simple polygon with $n$ vertices can be triangulated by adding $n-3$ non-crossing diagonals, which results in exactly $n-2$ triangles. This decomposition is fundamental for many algorithms.</p>
+                        <div class="text-center p-4 border-2 border-dashed border-slate-300 rounded-lg">
+                            <div class="inline-block relative">
+                                <span class="text-6xl text-slate-400">⬢</span>
+                                <p class="text-slate-600 mt-2 font-medium">An n-gon ($n=6$)</p>
+                                <p class="text-slate-500 text-sm">Number of Triangles: $n-2 = 4$</p>
+                                <p class="text-slate-500 text-sm">Number of Diagonals: $n-3 = 3$</p>
+                            </div>
+                        </div>
+                        <p class="text-sm text-slate-500 mt-4">An **ear** is a triangle formed by three consecutive vertices where the segment connecting the first and third is a diagonal. The **ear-clipping algorithm** repeatedly finds and "clips" off ears to triangulate a polygon.</p>
+                    </div>
+                </div>
+
+                <div class="bg-white p-6 rounded-xl shadow-sm mt-8">
+                    <h3 class="text-xl font-semibold mb-3 text-sky-800">Delaunay Triangulation & Voronoi Diagrams</h3>
+                    <p class="text-sm text-slate-500 mb-4">For a set of points, the Delaunay triangulation and the Voronoi diagram are geometric duals. The Delaunay triangulation maximizes the minimum angle, avoiding "skinny" triangles. A triangle is Delaunay if its circumcircle contains no other points.</p>
+                    <div class="chart-container">
+                        <canvas id="delaunayVoronoiChart"></canvas>
+                    </div>
+                     <p class="text-center text-sm text-slate-500 mt-2">Delaunay edges connect points; Voronoi edges are perpendicular bisectors of Delaunay edges.</p>
+                </div>
+            </div>
+
+            <div id="laplacian" class="content-section">
+                <h2 class="text-3xl font-bold text-slate-900 mb-4">The Laplacian Operator</h2>
+                <p class="mb-6 text-slate-600">The Laplacian is a fundamental "shape operator" in DGP. It measures how much a point deviates from the average of its neighbors, allowing it to capture local shape information like curvature. It forms the basis for smoothing, deformation, parameterization, and spectral analysis.</p>
+
+                <div class="grid md:grid-cols-2 gap-8">
+                    <div class="bg-white p-6 rounded-xl shadow-sm">
+                        <h3 class="text-xl font-semibold mb-3 text-sky-800">Discrete Laplacians</h3>
+                        <div class="space-y-4">
+                            <div>
+                                <h4 class="font-semibold text-slate-700">1. Uniform Laplacian</h4>
+                                <p class="text-sm text-slate-600">Purely combinatorial, weights are uniform. $L = D - A$, where D is the degree matrix and A is the adjacency matrix.</p>
+                                <code class="block bg-slate-100 text-slate-800 p-2 rounded-md mt-2 text-sm">$L_{ij} = \begin{cases} \text{deg}(v_i) & i=j \\ -1 & (i,j) \in E \\ 0 & \text{otherwise} \end{cases}$</code>
+                            </div>
+                             <div>
+                                <h4 class="font-semibold text-slate-700">2. Cotangent Laplacian</h4>
+                                <p class="text-sm text-slate-600">Geometry-aware, weights are based on angles. Better approximates the continuous Laplace-Beltrami operator.</p>
+                                <code class="block bg-slate-100 text-slate-800 p-2 rounded-md mt-2 text-sm">$w_{ij} = \frac{1}{2}(\cot\alpha_{ij} + \cot\beta_{ij})$</code>
+                            </div>
+                        </div>
+                    </div>
+                     <div class="bg-white p-6 rounded-xl shadow-sm">
+                        <h3 class="text-xl font-semibold mb-3 text-sky-800">Differential Coordinates</h3>
+                        <p class="text-sm text-slate-500 mb-4">Differential coordinates, $\delta_i$, capture the local detail at a vertex. They are the vector difference between a vertex and the average of its neighbors. Preserving them is the key to Laplacian-based deformation.</p>
+                        <p class="font-semibold text-slate-700">Uniform Weights:</p>
+                        <code class="block bg-slate-100 text-slate-800 p-2 rounded-md mt-1 mb-4 text-sm">$\delta_i = v_i - \frac{1}{\text{deg}(v_i)}\sum_{j \in N(i)} v_j$</code>
+                        <p class="font-semibold text-slate-700">Interactive Example:</p>
+                        <div class="mt-2 text-sm">
+                            <p>For vertex <b class="text-red-600">C</b>=(2, 3) with neighbors A=(0,2) and B=(3,1):</p>
+                            <p>Avg. Neighbors = ((0+3)/2, (2+1)/2) = (1.5, 1.5)</p>
+                            <p>$\delta_C$ = (2, 3) - (1.5, 1.5) = <b class="text-sky-700">(0.5, 1.5)</b></p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white p-6 rounded-xl shadow-sm mt-8">
+                    <h3 class="text-xl font-semibold mb-3 text-sky-800">Laplacian Eigenanalysis</h3>
+                    <p class="text-sm text-slate-500 mb-4">The eigenvectors of the Laplacian matrix form a basis for functions on the mesh, analogous to the Fourier basis. Low-frequency eigenvectors capture global shape, while high-frequency ones capture fine details.</p>
+                    <ul class="list-disc list-inside text-slate-600 space-y-2">
+                        <li>The number of zero eigenvalues equals the number of connected components.</li>
+                        <li>The Fiedler vector (eigenvector of the 2nd smallest eigenvalue) is useful for mesh partitioning.</li>
+                        <li>The spectrum (set of eigenvalues) is a shape "fingerprint" and is invariant to isometries.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div id="reconstruction" class="content-section">
+                <h2 class="text-3xl font-bold text-slate-900 mb-4">Surface Reconstruction</h2>
+                <p class="mb-6 text-slate-600">This topic deals with creating a mesh from raw data, typically a point cloud from a 3D scanner. The main challenge is to recover a continuous surface from discrete, often noisy, samples.</p>
+
+                <div class="grid md:grid-cols-2 gap-8">
+                    <div class="bg-white p-6 rounded-xl shadow-sm">
+                        <h3 class="text-xl font-semibold mb-3 text-sky-800">Explicit vs. Implicit</h3>
+                        <div class="space-y-4">
+                            <div>
+                                <h4 class="font-semibold text-slate-700">Explicit Reconstruction</h4>
+                                <p class="text-sm text-slate-600">Directly connects input points to form triangles (e.g., Crust Algorithm).
+                                    <br><b class="text-green-600">Pros:</b> Interpolates data, preserves original points.
+                                    <br><b class="text-red-600">Cons:</b> Very sensitive to noise and holes.</p>
+                            </div>
+                            <div>
+                                <h4 class="font-semibold text-slate-700">Implicit Reconstruction</h4>
+                                <p class="text-sm text-slate-600">Defines a signed distance function (SDF) in space and extracts the zero-level set (e.g., using Marching Cubes).
+                                    <br><b class="text-green-600">Pros:</b> Robust to noise, guarantees watertight output.
+                                    <br><b class="text-red-600">Cons:</b> Approximates data, can smooth sharp features.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white p-6 rounded-xl shadow-sm">
+                        <h3 class="text-xl font-semibold mb-3 text-sky-800">Marching Cubes Algorithm</h3>
+                        <p class="text-sm text-slate-500 mb-4">A classic algorithm for extracting a mesh from an implicit function sampled on a grid.</p>
+                        <ol class="list-decimal list-inside text-slate-600 space-y-2 text-sm">
+                            <li>Iterate through each grid cell (cube).</li>
+                            <li>Classify each of the 8 vertices as inside (+) or outside (-) the surface based on the SDF value.</li>
+                            <li>This creates an 8-bit index ($2^8=256$ cases).</li>
+                            <li>Use this index to look up a pre-computed triangulation for that cell.</li>
+                            <li>Calculate exact vertex positions on edges via linear interpolation.</li>
+                        </ol>
+                        <p class="text-xs text-slate-400 mt-4">Note: Ambiguous cases must be handled carefully to avoid holes in the final mesh.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div id="smoothing" class="content-section">
+                <h2 class="text-3xl font-bold text-slate-900 mb-4">Smoothing & Remeshing</h2>
+                <p class="mb-6 text-slate-600">These processes aim to improve the quality of an existing mesh. Smoothing removes noise, while remeshing changes connectivity to create better-shaped triangles.</p>
+
+                <div class="bg-white p-6 rounded-xl shadow-sm">
+                    <h3 class="text-xl font-semibold mb-3 text-sky-800">Interactive Laplacian Smoothing</h3>
+                    <p class="text-sm text-slate-500 mb-4">Laplacian smoothing moves each vertex towards the average of its neighbors. This acts like a diffusion process, smoothing out high-frequency noise but also causing shrinkage. Click "Smooth" to apply one iteration of uniform Laplacian smoothing to the noisy signal.</p>
+                    <div class="chart-container">
+                        <canvas id="smoothingChart"></canvas>
+                    </div>
+                    <div class="mt-4 flex space-x-2">
+                        <button id="smoothSignal" class="flex-1 bg-sky-600 text-white py-2 px-4 rounded-md hover:bg-sky-700 transition">Smooth</button>
+                        <button id="resetSignal" class="flex-1 bg-slate-200 text-slate-700 py-2 px-4 rounded-md hover:bg-slate-300 transition">Reset Signal</button>
+                    </div>
+                </div>
+
+                <div class="grid md:grid-cols-2 gap-8 mt-8">
+                    <div class="bg-white p-6 rounded-xl shadow-sm">
+                        <h3 class="text-xl font-semibold mb-3 text-sky-800">Remeshing Operators</h3>
+                        <p class="text-sm text-slate-500 mb-4">Isotropic remeshing improves mesh quality by iteratively applying local operators:</p>
+                        <ul class="list-disc list-inside text-slate-600 space-y-2">
+                            <li><b class="text-slate-800">Edge Flip:</b> To improve angles and vertex valences.</li>
+                            <li><b class="text-slate-800">Edge Split:</b> To eliminate long edges.</li>
+                            <li><b class="text-slate-800">Edge Collapse:</b> To eliminate short edges.</li>
+                            <li><b class="text-slate-800">Vertex Relocation:</b> Laplacian smoothing to reposition vertices.</li>
+                        </ul>
+                    </div>
+
+                    <div class="bg-white p-6 rounded-xl shadow-sm">
+                        <h3 class="text-xl font-semibold mb-3 text-sky-800">Quadric Error Metrics (QEM)</h3>
+                        <p class="text-sm text-slate-500 mb-4">A powerful cost metric for mesh simplification (decimation). It guides edge collapses to preserve sharp features.</p>
+                        <p class="text-sm text-slate-600">For each vertex, a $4 \times 4$ matrix $Q$ stores the sum of squared distances to its incident triangle planes. When collapsing an edge, the new vertex position is chosen to minimize the error calculated from the sum of the two original vertices' quadrics ($Q' = Q_1+Q_2$).</p>
+                    </div>
+                </div>
+            </div>
+
+            <div id="subdivision" class="content-section">
+                <h2 class="text-3xl font-bold text-slate-900 mb-4">Subdivision Surfaces</h2>
+                <p class="mb-6 text-slate-600">Subdivision is a method for generating smooth surfaces from coarse control meshes. It's an iterative process of refining the mesh topology and updating vertex geometry, converging to a smooth limit surface.</p>
+                <div class="grid md:grid-cols-2 gap-8">
+                     <div class="bg-white p-6 rounded-xl shadow-sm">
+                        <h3 class="text-xl font-semibold mb-3 text-sky-800">Loop Subdivision (Triangles)</h3>
+                        <p class="text-sm text-slate-500 mb-2">An approximating scheme producing $C^2$ surfaces at regular (valence 6) vertices.</p>
+                        <h4 class="font-semibold text-slate-700 mt-4">1. Topological Refinement</h4>
+                        <p class="text-sm text-slate-600">Split each triangle into 4 smaller ones.</p>
+                        <h4 class="font-semibold text-slate-700 mt-4">2. Geometric Update</h4>
+                        <p class="text-sm font-medium text-slate-700">New Edge Vertex:</p>
+                        <code class="block bg-slate-100 text-slate-800 p-2 rounded-md mt-1 text-sm">$u = \frac{3}{8}(v_a+v_b) + \frac{1}{8}(v_c+v_d)$</code>
+                        <p class="text-sm font-medium text-slate-700 mt-2">Updated Old Vertex:</p>
+                        <code class="block bg-slate-100 text-slate-800 p-2 rounded-md mt-1 text-sm">$v' = (1-d\beta)v + \beta \sum v_{neighbors}$</code>
+                    </div>
+                    <div class="bg-white p-6 rounded-xl shadow-sm">
+                        <h3 class="text-xl font-semibold mb-3 text-sky-800">Catmull-Clark (Quads)</h3>
+                        <p class="text-sm text-slate-500 mb-2">An approximating scheme widely used in animation, producing $C^2$ surfaces at regular (valence 4) vertices.</p>
+                         <h4 class="font-semibold text-slate-700 mt-4">1. Topological Refinement</h4>
+                        <p class="text-sm text-slate-600">Add face points, edge points, and connect them.</p>
+                        <h4 class="font-semibold text-slate-700 mt-4">2. Geometric Update</h4>
+                        <p class="text-sm font-medium text-slate-700">Face Point:</p>
+                        <p class="text-sm text-slate-600">Average of face's vertices.</p>
+                        <p class="text-sm font-medium text-slate-700 mt-2">Edge Point:</p>
+                        <p class="text-sm text-slate-600">Average of endpoints and adjacent face points.</p>
+                        <p class="text-sm font-medium text-slate-700 mt-2">Vertex Point:</p>
+                        <p class="text-sm text-slate-600">Weighted average of original vertex, neighbor midpoints, and adjacent face points.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div id="parameterization" class="content-section">
+                 <h2 class="text-3xl font-bold text-slate-900 mb-4">Mesh Parameterization</h2>
+                 <p class="mb-6 text-slate-600">Parameterization is the process of mapping a 3D mesh to a 2D domain (like a square or disk). This "unflattens" the surface, which is crucial for applications like texture mapping and remeshing.</p>
+                 <div class="grid md:grid-cols-2 gap-8">
+                     <div class="bg-white p-6 rounded-xl shadow-sm">
+                         <h3 class="text-xl font-semibold mb-3 text-sky-800">Method: Linear System</h3>
+                         <p class="text-sm text-slate-500 mb-4">For meshes with a single boundary (disk-like topology):</p>
+                         <ol class="list-decimal list-inside space-y-2 text-slate-600">
+                             <li><b>Fix Boundary:</b> Map the 3D boundary vertices to a convex 2D shape (e.g., a circle).</li>
+                             <li><b>Solve for Interior:</b> Find the 2D positions of interior vertices by solving a sparse linear system $Wx=b$. Each interior vertex's position is a weighted average of its neighbors' 2D positions.</li>
+                         </ol>
+                     </div>
+                     <div class="bg-white p-6 rounded-xl shadow-sm">
+                         <h3 class="text-xl font-semibold mb-3 text-sky-800">Choice of Weights (Distortion)</h3>
+                         <p class="text-sm text-slate-500 mb-4">The weights used in the linear system determine the distortion properties of the mapping.</p>
+                          <ul class="list-disc list-inside text-slate-600 space-y-2">
+                             <li><b class="text-slate-800">Uniform (Tutte):</b> $w_{ij}=1$. Guarantees a valid (non-flipping) map but has high distortion.</li>
+                             <li><b class="text-slate-800">Harmonic (Cotangent):</b> Aims for a conformal (angle-preserving) map but can fail for non-Delaunay meshes.</li>
+                             <li><b class="text-slate-800">Mean Value:</b> Guarantees a valid map for convex boundaries and performs well in practice.</li>
+                         </ul>
+                     </div>
+                 </div>
+            </div>
+
+            <div id="registration" class="content-section">
+                <h2 class="text-3xl font-bold text-slate-900 mb-4">Shape Registration (Rigid)</h2>
+                <p class="mb-6 text-slate-600">Registration is the task of aligning two or more shapes in a common coordinate system. Rigid registration only considers rotation and translation, and is often a key step in processing 3D scan data.</p>
+                <div class="bg-white p-6 rounded-xl shadow-sm">
+                    <h3 class="text-xl font-semibold mb-3 text-sky-800">Iterative Closest Point (ICP) Algorithm</h3>
+                    <p class="text-sm text-slate-500 mb-4">ICP is the workhorse algorithm for aligning two point clouds when correspondences are unknown. It works by iterating between finding correspondences and computing the optimal transformation.</p>
+                    <div id="icp-flow" class="space-y-2">
+                        <div class="icp-step p-3 bg-slate-100 rounded-lg cursor-pointer hover:bg-slate-200">1. Find Correspondences: For each point in Source, find its closest point in Target.</div>
+                        <div class="icp-detail hidden p-3 bg-sky-50 rounded-lg text-sm">- Use a k-d tree for efficient nearest neighbor search ($O(\log N)$).
+                        <br>- Filter pairs (e.g., by distance, normal compatibility) to reject outliers.</div>
+                        <div class="icp-step p-3 bg-slate-100 rounded-lg cursor-pointer hover:bg-slate-200">2. Compute Optimal Transformation: Given pairs, find best Rotation (R) and Translation (t).</div>
+                        <div class="icp-detail hidden p-3 bg-sky-50 rounded-lg text-sm">- Translation $t = \text{centroid}_Q - R \cdot \text{centroid}_P$.
+                        <br>- Rotation $R$ is found by computing the SVD of the cross-covariance matrix. $R=VU^T$.</div>
+                        <div class="icp-step p-3 bg-slate-100 rounded-lg cursor-pointer hover:bg-slate-200">3. Apply Transformation & Iterate: Apply (R,t) to Source and repeat until convergence.</div>
+                        <div class="icp-detail hidden p-3 bg-sky-50 rounded-lg text-sm">- Convergence is reached when the change in error is small or max iterations are hit.
+                        <br>- A good initial alignment is crucial to avoid local minima.</div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="deformation" class="content-section">
+                <h2 class="text-3xl font-bold text-slate-900 mb-4">Mesh Deformation</h2>
+                <p class="mb-6 text-slate-600">Deformation allows for intuitive editing of mesh shapes. The goal is to allow users to move parts of a mesh (handles) while the rest of the shape follows in a natural, detail-preserving way.</p>
+                 <div class="grid md:grid-cols-2 gap-8">
+                     <div class="bg-white p-6 rounded-xl shadow-sm">
+                        <h3 class="text-xl font-semibold mb-3 text-sky-800">Laplacian-based Deformation</h3>
+                         <p class="text-sm text-slate-500 mb-4">This method works by trying to preserve the original differential coordinates ($\delta_0$) of the mesh while satisfying user-defined handle constraints.</p>
+                         <p class="text-slate-600 mb-2">This is formulated as a least-squares energy minimization:</p>
+                         <code class="block bg-slate-100 text-slate-800 p-2 rounded-md text-sm">$E(v') = ||Lv' - \delta_0||^2 + ||v'_{handles} - c||^2$</code>
+                         <p class="text-slate-600 mt-2">Solving this results in a single, sparse linear system.
+                            <br><b class="text-red-600">Limitation:</b> Not rotation-invariant, can cause artifacts with large rotations.</p>
+                     </div>
+                     <div class="bg-white p-6 rounded-xl shadow-sm">
+                         <h3 class="text-xl font-semibold mb-3 text-sky-800">As-Rigid-As-Possible (ARAP)</h3>
+                         <p class="text-sm text-slate-500 mb-4">A powerful, rotation-invariant method that treats each local neighborhood as deforming as rigidly as possible.</p>
+                         <p class="text-slate-600 mb-2">Uses an alternating optimization scheme:</p>
+                         <ol class="list-decimal list-inside text-slate-600 space-y-1">
+                             <li><b>Local Step (Rotation Fitting):</b> For each vertex, find the optimal rotation $R_i$ that best aligns its deformed 1-ring with its rest-pose 1-ring (using SVD).</li>
+                             <li><b>Global Step (Vertex Update):</b> With rotations fixed, solve a linear system (similar to Laplacian) to find new vertex positions $v'$.</li>
+                         </ol>
+                          <p class="text-slate-600 mt-2">Iterating these two steps (usually 5-6 times) produces high-quality, intuitive deformations.</p>
+                     </div>
+                 </div>
+            </div>
+
+            <div id="fitting" class="content-section">
+                <h2 class="text-3xl font-bold text-slate-900 mb-4">Fitting & Generation</h2>
+                <p class="mb-6 text-slate-600">This area covers algorithms for fitting simple geometric primitives to data (e.g., lines, planes) and for learning statistical models to generate new shapes.</p>
+                 <div class="grid md:grid-cols-2 gap-8">
+                    <div class="bg-white p-6 rounded-xl shadow-sm">
+                        <h3 class="text-xl font-semibold mb-3 text-sky-800">Least-Squares Fitting</h3>
+                        <p class="text-sm text-slate-500 mb-4">Finds model parameters by minimizing the sum of squared errors.</p>
+                         <ul class="list-disc list-inside text-slate-600 space-y-2">
+                             <li><b class="text-slate-800">Line Fitting ($y=ax+b$):</b> Leads to a $2 \times 2$ system of linear equations (normal equations).</li>
+                             <li><b class="text-slate-800">Plane Fitting ($n \cdot x+d=0$):</b> The optimal normal $n$ is the eigenvector corresponding to the smallest eigenvalue of the points' covariance matrix.</li>
+                         </ul>
+                         <p class="text-sm mt-4"><b class="text-red-600">Weakness:</b> Highly sensitive to outliers.</p>
+                    </div>
+                     <div class="bg-white p-6 rounded-xl shadow-sm">
+                        <h3 class="text-xl font-semibold mb-3 text-sky-800">Robust Fitting Methods</h3>
+                        <p class="text-sm text-slate-500 mb-4">Methods designed to work in the presence of outliers.</p>
+                         <ul class="list-disc list-inside text-slate-600 space-y-2">
+                             <li><b class="text-slate-800">RANSAC (Random Sample Consensus):</b> Iteratively fits models to minimal random samples and picks the model with the most "inliers".</li>
+                             <li><b class="text-slate-800">Hough Transform:</b> A voting scheme in parameter space. Each data point votes for all models it could belong to. Peaks in the voting space correspond to the most likely shapes.</li>
+                         </ul>
+                    </div>
+                 </div>
+            </div>
+
+            <div id="calculations" class="content-section">
+                <h2 class="text-3xl font-bold text-slate-900 mb-4">Calculation Practice</h2>
+                <p class="mb-6 text-slate-600">The exam may require you to perform calculations for small examples. Here are step-by-step walkthroughs for common problem types. No calculator will be needed, so expect simple numbers.</p>
+
+                <div class="bg-white p-6 rounded-xl shadow-sm">
+                    <h3 class="text-xl font-semibold mb-3 text-sky-800">Problem: Least-Squares Line Fit</h3>
+                    <p class="text-slate-600 mb-2">Fit a line $y = ax+b$ to the points (0, 1), (1, 3), (2, 2).</p>
+                    <div class="text-sm space-y-2">
+                        <p><b>1. Set up Normal Equations:</b></p>
+                        <code class="block bg-slate-100 text-slate-800 p-2 rounded-md">$(\sum x_i^2)a + (\sum x_i)b = \sum x_i y_i$</code>
+                        <code class="block bg-slate-100 text-slate-800 p-2 rounded-md">$(\sum x_i)a + n b = \sum y_i$</code>
+                        <p><b>2. Calculate Sums:</b></p>
+                        <p>$n = 3$</p>
+                        <p>$\sum x_i = 0 + 1 + 2 = 3$</p>
+                        <p>$\sum y_i = 1 + 3 + 2 = 6$</p>
+                        <p>$\sum x_i^2 = 0^2 + 1^2 + 2^2 = 5$</p>
+                        <p>$\sum x_i y_i = (0 \cdot 1) + (1 \cdot 3) + (2 \cdot 2) = 7$</p>
+                        <p><b>3. Substitute and Solve:</b></p>
+                        <p>$5a + 3b = 7$</p>
+                        <p>$3a + 3b = 6 \implies a + b = 2 \implies b = 2 - a$</p>
+                        <p>$5a + 3(2 - a) = 7 \implies 5a + 6 - 3a = 7 \implies 2a = 1 \implies \mathbf{a = 0.5}$</p>
+                        <p>$b = 2 - 0.5 \implies \mathbf{b = 1.5}$</p>
+                        <p><b>Result:</b> The best-fit line is <b class="text-sky-700">$y = 0.5x + 1.5$</b></p>
+                    </div>
+                </div>
+
+                <div class="bg-white p-6 rounded-xl shadow-sm mt-8">
+                    <h3 class="text-xl font-semibold mb-3 text-sky-800">Problem: Barycentric Coordinates</h3>
+                    <p class="text-slate-600 mb-2">Find the barycentric coordinates $(\alpha, \beta, \gamma)$ of point $P=(2,2)$ with respect to triangle $A=(0,0), B=(6,0), C=(0,6)$.</p>
+                    <div class="text-sm space-y-2">
+                        <p><b>1. Recall Formula:</b> $\alpha = \frac{\text{Area}(PBC)}{\text{Area}(ABC)}$, $\beta = \frac{\text{Area}(PCA)}{\text{Area}(ABC)}$, $\gamma = 1 - \alpha - \beta$.</p>
+                        <p><b>2. Calculate Triangle Areas:</b> Area of a triangle with vertices $(x_1, y_1), (x_2, y_2), (x_3, y_3)$ is $0.5 |x_1(y_2-y_3) + x_2(y_3-y_1) + x_3(y_1-y_2)|$.</p>
+                        <p>Area(ABC) = $0.5 |0(0-6) + 6(6-0) + 0(0-0)| = 0.5 |36| = 18$</p>
+                        <p>Area(PBC) = $0.5 |2(0-6) + 6(6-2) + 0(2-0)| = 0.5 |-12 + 24| = 6$</p>
+                        <p>Area(PCA) = $0.5 |2(6-0) + 0(0-2) + 0(2-6)| = 0.5 |12| = 6$</p>
+                        <p><b>3. Calculate Coordinates:</b></p>
+                        <p>$\alpha = \text{Area}(PBC) / \text{Area}(ABC) = 6 / 18 = \mathbf{1/3}$</p>
+                        <p>$\beta = \text{Area}(PCA) / \text{Area}(ABC) = 6 / 18 = \mathbf{1/3}$</p>
+                        <p>$\gamma = 1 - \alpha - \beta = 1 - 1/3 - 1/3 = \mathbf{1/3}$</p>
+                        <p><b>Result:</b> Point P is the centroid, with coordinates <b class="text-sky-700">$(1/3, 1/3, 1/3)$</b>.</p>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const links = document.querySelectorAll('.sidebar-link');
+            const sections = document.querySelectorAll('.content-section');
+            const icpSteps = document.querySelectorAll('.icp-step');
+
+            function showSection(hash) {
+                sections.forEach(section => {
+                    if ('#' + section.id === hash) {
+                        section.classList.add('active');
+                    } else {
+                        section.classList.remove('active');
+                    }
+                });
+
+                links.forEach(link => {
+                    if (link.getAttribute('href') === hash) {
+                        link.classList.add('active');
+                    } else {
+                        link.classList.remove('active');
+                    }
+                });
+            }
+
+            links.forEach(link => {
+                link.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    const hash = this.getAttribute('href');
+                    history.pushState(null, null, hash);
+                    showSection(hash);
+                });
+            });
+
+            icpSteps.forEach(step => {
+                step.addEventListener('click', function() {
+                    const detail = this.nextElementSibling;
+                    if (detail && detail.classList.contains('icp-detail')) {
+                        detail.classList.toggle('hidden');
+                    }
+                });
+            });
+
+            window.addEventListener('popstate', function() {
+                showSection(window.location.hash || '#foundations');
+            });
+
+            showSection(window.location.hash || '#foundations');
+
+            const verticesInput = document.getElementById('vertices');
+            const edgesInput = document.getElementById('edges');
+            const facesInput = document.getElementById('faces');
+            const calculateBtn = document.getElementById('calculateEuler');
+            const resetBtn = document.getElementById('resetEuler');
+            const resultP = document.getElementById('eulerResult');
+
+            calculateBtn.addEventListener('click', () => {
+                const V = parseInt(verticesInput.value);
+                const E = parseInt(edgesInput.value);
+                const F = parseInt(facesInput.value);
+
+                if (!isNaN(V) && !isNaN(E) && isNaN(F)) {
+                    facesInput.value = 2 - V + E;
+                    resultP.textContent = "Calculated Faces (F)";
+                } else if (!isNaN(V) && isNaN(E) && !isNaN(F)) {
+                    edgesInput.value = V + F - 2;
+                    resultP.textContent = "Calculated Edges (E)";
+                } else if (isNaN(V) && !isNaN(E) && !isNaN(F)) {
+                    verticesInput.value = 2 - F + E;
+                    resultP.textContent = "Calculated Vertices (V)";
+                } else {
+                    resultP.textContent = "Please provide exactly two values.";
+                }
+            });
+
+            resetBtn.addEventListener('click', () => {
+                verticesInput.value = '';
+                edgesInput.value = '';
+                facesInput.value = '';
+                resultP.textContent = '';
+            });
+
+            const delaunayVoronoiCtx = document.getElementById('delaunayVoronoiChart').getContext('2d');
+            const points = [{x: 1, y: 7}, {x: 2, y: 2}, {x: 4, y: 9}, {x: 5, y: 3}, {x: 7, y: 6}, {x: 9, y: 4}];
+            const delaunayEdges = [
+                {p1: points[0], p2: points[1]}, {p1: points[0], p2: points[2]},
+                {p1: points[1], p2: points[3]}, {p1: points[1], p2: points[4]},
+                {p1: points[2], p2: points[4]}, {p1: points[3], p2: points[4]},
+                {p1: points[3], p2: points[5]}, {p1: points[4], p2: points[5]},
+                {p1: points[0], p2: points[4]}
+            ];
+
+            const voronoiEdges = [
+                {from: {x:3.4, y:5.3}, to:{x:0, y:4.5}}, {from: {x:3.4, y:5.3}, to:{x:3.3, y:0}},
+                {from: {x:3.4, y:5.3}, to:{x:5.8, y:7.7}}, {from: {x:5.8, y:7.7}, to:{x:3.5, y:11}},
+                {from: {x:5.8, y:7.7}, to:{x:7, y:0}}, {from: {x:6.7, y:4.3}, to:{x:5.8, y:7.7}},
+                {from: {x:6.7, y:4.3}, to:{x:10, y:2.5}}, {from: {x:6.7, y:4.3}, to:{x:3.3, y:0}},
+            ];
+
+            const delaunayData = delaunayEdges.flatMap(edge => [edge.p1, edge.p2]);
+
+            new Chart(delaunayVoronoiCtx, {
+                type: 'scatter',
+                data: {
+                    datasets: [{
+                        label: 'Points',
+                        data: points,
+                        backgroundColor: 'rgb(14, 165, 233)',
+                        pointRadius: 5,
+                    }, {
+                        type: 'line',
+                        label: 'Delaunay Edges',
+                        data: delaunayData,
+                        borderColor: 'rgba(56, 189, 248, 0.5)',
+                        borderWidth: 2,
+                        fill: false,
+                        showLine: true,
+                        pointRadius: 0,
+                        tension: 0,
+                        segment: {
+                            borderColor: ctx => 'rgba(56, 189, 248, 0.5)',
+                        }
+                    },
+                    {
+                        type: 'line',
+                        label: 'Voronoi Edges',
+                        data: voronoiEdges.flatMap(edge => [edge.from, edge.to]),
+                        borderColor: 'rgba(249, 115, 22, 0.5)',
+                        borderWidth: 2,
+                        fill: false,
+                        showLine: true,
+                        pointRadius: 0,
+                        tension: 0,
+                        segment: {
+                             borderColor: ctx => 'rgba(249, 115, 22, 0.5)',
+                        }
+                    }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: { beginAtZero: true, max: 10 },
+                        y: { beginAtZero: true, max: 10 }
+                    },
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    if(context.dataset.label === 'Points'){
+                                       let label = context.dataset.label || '';
+                                       if (label) { label += ': '; }
+                                       label += '(' + context.parsed.x + ', ' + context.parsed.y + ')';
+                                       return label;
+                                    }
+                                    return false;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            let smoothingChart;
+            const smoothingCtx = document.getElementById('smoothingChart').getContext('2d');
+            let signalData = [];
+            const originalSignal = [];
+
+            function generateSignal() {
+                signalData = [];
+                originalSignal.length = 0;
+                for (let i = 0; i < 50; i++) {
+                    let y = Math.sin(i / 5) * 5 + 5;
+                    if (Math.random() > 0.7) {
+                        y += (Math.random() - 0.5) * 4;
+                    }
+                    signalData.push(y);
+                    originalSignal.push(y);
+                }
+            }
+
+            function createSmoothingChart() {
+                if (smoothingChart) {
+                    smoothingChart.destroy();
+                }
+                smoothingChart = new Chart(smoothingCtx, {
+                    type: 'line',
+                    data: {
+                        labels: Array.from(Array(50).keys()),
+                        datasets: [{
+                            label: 'Signal',
+                            data: signalData,
+                            borderColor: 'rgb(59, 130, 246)',
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            tension: 0.1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: { y: { beginAtZero: false } },
+                        animation: { duration: 200 },
+                        plugins: { legend: { display: false } }
+                    }
+                });
+            }
+
+            document.getElementById('smoothSignal').addEventListener('click', () => {
+                const newData = [...signalData];
+                for (let i = 1; i < signalData.length - 1; i++) {
+                    newData[i] = signalData[i] * 0.5 + (signalData[i-1] + signalData[i+1]) * 0.25;
+                }
+                signalData = newData;
+                smoothingChart.data.datasets[0].data = signalData;
+                smoothingChart.update();
+            });
+
+            document.getElementById('resetSignal').addEventListener('click', () => {
+                signalData = [...originalSignal];
+                smoothingChart.data.datasets[0].data = signalData;
+                smoothingChart.update();
+            });
+
+            generateSignal();
+            createSmoothingChart();
+        });
+    </script>
+</body>
+</html>
