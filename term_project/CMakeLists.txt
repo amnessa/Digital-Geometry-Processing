@@ -43,6 +43,9 @@ set(SOURCES
     Mesh.cpp
     Painter.cpp
     helpers.cpp
+    IsocurveAnalysis.cpp
+    RigidityAnalysis.cpp
+    VisualizationUtils.cpp
 )
 
 # Create the executable target.
