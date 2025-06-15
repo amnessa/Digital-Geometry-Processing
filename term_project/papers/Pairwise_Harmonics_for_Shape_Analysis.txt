@@ -1,0 +1,1467 @@
+1172
+
+IEEE TRANSACTIONS ON VISUALIZATION AND COMPUTER GRAPHICS,
+
+VOL. 19,
+
+NO. 7, JULY 2013
+
+Pairwise Harmonics for Shape Analysis
+Youyi Zheng, Chiew-Lan Tai, Eugene Zhang, Senior Member, IEEE, and Pengfei Xu
+Abstract—This paper introduces a simple yet effective shape analysis mechanism for geometry processing. Unlike traditional shape
+analysis techniques which compute descriptors per surface point up to certain neighborhoods, we introduce a shape analysis
+framework in which the descriptors are based on pairs of surface points. Such a pairwise analysis approach leads to a new class of
+shape descriptors that are more global, discriminative, and can effectively capture the variations in the underlying geometry.
+Specifically, we introduce new shape descriptors based on the isocurves of harmonic functions whose global maximum and minimum
+occur at the point pair. We show that these shape descriptors can infer shape structures and consistently lead to simpler and more
+efficient algorithms than the state-of-the-art methods for three applications: intrinsic reflectional symmetry axis computation, matching
+shape extremities, and simultaneous surface segmentation and skeletonization.
+Index Terms—Shape analysis, pairwise harmonics, intrinsic symmetry, shape correspondence, segmentation and skeletonization
+
+Ç
+1
+
+INTRODUCTION
+
+S
+
+HAPE analysis is essential in a wide range of geometry
+
+processing applications such as content-based shape
+matching and retrieval, part recognition, and shape editing
+[1], [2]. An effective, numerically robust, and computationally tractable shape descriptor is key in shape analysis. Most
+existing shape descriptors, such as the curvature map [3],
+mesh saliency [4], and spin images [5], are defined in terms
+of shape features extracted in local surface regions.
+Consequently, they are often not sufficient to abstract more
+global structures in the shape, such as global symmetry.
+In recent years, more global shape descriptors have been
+introduced. The shape diameter function [6], for instance, is
+a scalar quantity based on the local thickness of the shape
+around each measurement point and is robust against noise
+and pose variations. A number of approaches [7], [8], [9]
+exploit the spectrum of the eigenspace of heat diffusion
+operators to define signatures around each surface point
+which capture isometrics. The intrinsic maps [10], [11], [12]
+define surface embedding in low-dimensional conformal
+spaces where the search for correspondence mappings
+becomes more tractable. These descriptors defined for each
+surface point are either expensive to compute or are
+designed for specific applications (e.g., shape correspondence, symmetry computation), therefore are not easy to
+generalize directly.
+We introduce pairwise harmonics, in the context of
+manifold surfaces, for generic shape processing at global
+scales. At the core of our approach is the notion of pairwise
+
+. Y. Zheng is with the Geometric Modeling and Scientific Visualization
+Center, King Abdullah University of Science and Technology, Thuwal
+23955-6900, Kingdom of Saudi Arabia. E-mail: youyi.zheng@kaust.edu.sa.
+. C.-L. Tai and P. Xu are with the Department of Computer Science and
+Engineering, The Hong Kong University of Science and Technology, Clear
+Water Bay, Kowloon, Hong Kong. E-mail: {taicl, xupengfei}@cse.ust.hk.
+. E. Zhang is with the School of Electrical Engineering and Computer
+Science, Oregon State University, Corvallis, OR 97331.
+E-mail: zhange@eecs.oregonstate.edu.
+Manuscript received 30 Nov. 2011; revised 9 June 2012; accepted 21 Oct.
+2012; published online 21 Nov. 2012.
+Recommended for acceptance by H. Pottmann.
+For information on obtaining reprints of this article, please send e-mail to:
+tvcg@computer.org, and reference IEEECS Log Number TVCG-2011-11-0302.
+Digital Object Identifier no. 10.1109/TVCG.2012.309.
+
+analysis (Section 2). Unlike previous approaches that mostly
+focus on processing the whole surface in a pointwise
+manner, our approach analyzes the shape in a pairwise
+manner and computes shape descriptors for pairs of surface
+points. Specifically, the shape descriptors are defined in
+terms of properties of isocurves uniformly sampled from
+pairwise harmonic fields.
+Defining descriptors for a point pair offers several
+benefits over traditional descriptors defined in terms of
+one point. First, pairwise descriptors can provide not only
+insights about the geometry between the point pair, but also
+their relationship. This makes the analysis framework more
+global and discriminative in revealing shape structures,
+such as symmetry. Second, pairwise analysis constrains the
+measurements over point pairs (in our case along a local
+geodesic path), and thus can reveal shape structures at
+different scales for different point pairs. It naturally
+encapsules multiscale analysis into a single framework
+with no additional cost. Further, exploring shape geometry
+in both global and local scales can tolerate partially missing
+information when matching different shape parts. Third,
+pairwise descriptors often overlap (see the isocurves on
+right legs of the Armadillo in Fig. 1), making a sparse set of
+pairwise descriptors sufficient in representing the underlying geometry. This property greatly decreases the
+computation complexity for applications that require examining global shape properties (e.g., part recognition,
+skeletionization, shape matching, and so on.).
+Inferring inter-shape correspondence and understanding
+the symmetry structure are known to be challenging
+problems due to the nature of the computation difficulties
+in recovering such high-level shape information from the
+geometry alone. Hence, the state-of-the-art approaches for
+computing the symmetry and correspondence often employ
+rather complicated and computationally expensive techniques based on statistics [13], [14], heat diffusion [7], [8], [9]
+and conformal maps [10], [11], [12], and so on. These
+sophisticated mechanisms are often costly in computation.
+Recently, Xu et al. [14] discover intrinsic reflectional
+symmetry axis by narrowing down the search space
+through a series of tests. However, their approach can still
+
+Authorized licensed use limited to: ULAKBIM UASL - MIDDLE EAST TECHNICAL UNIVERSITY. Downloaded on April 12,2025 at 18:58:50 UTC from IEEE Xplore. Restrictions apply.
+1077-2626/13/$31.00 ß 2013 IEEE
+
+Published by the IEEE Computer Society
+
+ZHENG ET AL.: PAIRWISE HARMONICS FOR SHAPE ANALYSIS
+
+Fig. 1. Two examples of pairwise harmonics and the histogram
+visualization of the extracted shape descriptors: the perimeter descriptor
+R (top histograms) and the distance descriptor D (bottom histograms).
+Notice the near symmetry of both distributions if the two points are
+symmetry (left).
+
+take up to hours to compute the symmetry axis. We show
+that the pairwise harmonics can lead to simpler and more
+efficient solutions for these problems (Sections 3.1 and 3.2).
+We demonstrate the effectiveness of the pairwise harmonics with three applications: intrinsic reflectional symmetry
+axis computation, shape correspondence, and simultaneous
+skeletonization and segmentation. We compare the results
+with the state-of-the-art techniques and show that the
+pairwise harmonics enable simpler and more efficient
+algorithms. Additionally, focusing on computing the pairwise global properties of the shape can lead to algorithms
+that are more robust toward local surface noise, pose
+variations, and shape topology.
+
+2
+
+PAIRWISE HARMONICS
+
+Previous work on shape descriptors. Shape descriptors (or shape
+signatures) have been extensively researched in the context
+of shape retrieval and shape matching [1]. Shape descriptors provide informative abstractions of the surface contents
+and offer effective means for similarity matching. Different
+descriptors reveal different shape information, e.g., the
+curvature map described the curvature distribution and
+the average geodesic distance reveals the protrusions in the
+surface [15], and surface visibility helps interior and
+exterior classification [16].
+Shape descriptors are often defined in terms of feature
+vectors or histograms (e.g., the spin image [5]). Graph-based
+descriptors [17] or statistical-based descriptors [18] have
+also been employed. There exists a wealth of shape
+descriptors in the domain of shape retrieval and matching;
+we refer readers to [1], [19] for reviews on the state-of-theart shape descriptors, and to [7], [8], [9], [20] for the more
+recently proposed descriptors based on the spectrum of
+Laplace-Beltrami operators.
+Recently, Tevs et al. [21] presented a geodesic-fan-like
+[22] shape descriptor for surface matching. The descriptor is
+defined as the distribution of the lengths of equally
+distanced geodesic rings propagating from a single point.
+They show that the descriptor has strong discriminating
+power in dissimilarity measurements among points, and
+
+1173
+
+Fig. 2. A pairwise harmonic field defined by two points (one on each
+hand) and the uniformly sampled isocurves. Observe that the perimeter
+descriptor R and the distance descriptor D are insensitive to pose
+variation, tessellation, and surface noise.
+
+employ a landmark-based algorithm to find surface
+correspondences. Our descriptor resembles their form in
+the sense that it is also defined on properties of propagating
+isocurves. However, to our best knowledge, there have been
+no previous descriptors proposed based on harmonic fields
+of point pairs.
+Shape descriptors from pairwise harmonics. Harmonic function is a well-established mathematical concept and has
+been widely applied in geometry processing [23], [24], [25]
+due to its desirable hamonicity properties, such as smoothness and local extrema coinciding with the singularities in
+the harmonic field. We exploit the harmonic functions
+coupling with a pairwise analysis mechanism for geometry
+analysis. The shape descriptors are defined on isocurves of
+harmonic functions for point pairs. To our knowledge, this
+is the first time harmonic field is examined in such a
+manner which can resolve the complexity of existing shape
+analysis algorithms.
+We now formally describe the pairwise harmonics. On a
+mesh surface, a harmonic function f defines a scalar field
+that satisfies the Laplace equation f ¼ 0, subject to certain
+Dirichlet boundary constraints. Given a pair of points ðp; qÞ
+on the mesh surface, the pairwise harmonic for ðp; qÞ, which
+we denote as fp;q , is defined as the harmonic field with
+Dirichlet boundary constraints fðpÞ ¼ 0 and fðqÞ ¼ 1. The
+discretization leads to a sparse linear system Lf ¼ b, with L
+denoting the Laplacian matrix with the cotangent weights
+[26] (we weight each vertex i with its one-ring voronoi
+area). We use the cotangent-weight because it is simple,
+approximates well a pure harmonicity [27], and has a set of
+desirable properties including inherent smoothness, isometric invariance and insensitive to noise and tessellation
+(see Fig. 2).
+Notice that such functions have a range between 0 and 1.
+We consider the levelsets of this function on the surface.
+Close to p and q, the levelsets can be approximated by disks
+on the surface. Away from p and q, the geometry and
+topology of the levelsets can become more complex
+(e.g., multiple connected components, critical points). This
+motivates us to quantify similarity measurements using the
+properties of the function levelsets, in particular the length
+of the isocurves and their average distance to the end points
+p and q, as our shape descriptors.
+
+Authorized licensed use limited to: ULAKBIM UASL - MIDDLE EAST TECHNICAL UNIVERSITY. Downloaded on April 12,2025 at 18:58:50 UTC from IEEE Xplore. Restrictions apply.
+
+1174
+
+IEEE TRANSACTIONS ON VISUALIZATION AND COMPUTER GRAPHICS,
+
+We uniformly sample K isocurves between the interval
+½0; 1 (see Fig. 1). This set of isocurves is the key ingredient
+of our shape analysis algorithms. From the isocurves, we
+extract two types of descriptors and demonstrate their use
+in different applications.
+The perimeter descriptor is defined as the distribution of
+the length of the isocurves between the pair ðp; qÞ:
+
+
+ð1Þ
+Rpq ¼ r1pq ; r2pq ; . . . ; rK
+pq ;
+where ripq is the length of the ith isocurve. Fig. 1 shows two
+examples of the perimeter distribution. This distribution
+reveals the shape variation between the point pair, hence
+facilitates shape matching. The perimeter descriptor also
+captures symmetry of shape. Indeed, if the local geometry
+near the point pairs are similar, the perimeter distribution
+of the isocurves will demonstrate similarity (Fig. 1(left)).
+We define another descriptor, called distance descriptor,
+which captures shape information orthogonal to the
+perimeter descriptor:
+
+
+ð2Þ
+Dpq ¼ d1pq ; d2pq ; . . . ; dK
+pq ;
+where dipq is the average geodesic distance from points on
+the isocurves to either p (for first half of isocurves) or q (for
+second half of isocurves); i.e., dipq ¼ geoði; sÞ where s ¼ p if
+i < K=2 and s ¼ q otherwise. This distance can be viewed
+as horizontal geodesic information along the medial axis
+connecting centers of isocurves. Fig. 1 also shows two
+examples of the distance distribution.
+We will show that the two descriptors can reveal
+symmetries of the shape between a point pair. Intuitively,
+if two points merit an intrinsic symmetry, then both
+descriptors exhibit nearly symmetric profiles. Specifically,
+the distribution histograms of both descriptors are symmetric if the two points ðp; qÞ are geometrically symmetric,
+and dip;q ¼ dKi
+for any 0  i < K. In
+i.e., rip;q ¼ rKi
+q;p
+q;p
+Section 3.1, we combine the two descriptors to define a
+path intrinsic symmetry (PIS) measure which is capable of
+capturing both symmetry and partial symmetry of shapes.
+Thanks to the inherent smoothness of the cotangentweighted harmonic fields, the computed pairwise descriptors are insensitive to surface noise and isometric deformation (Fig. 2). These desirable properties lead to robust
+algorithms we shall present in the next sections.
+
+3
+
+APPLICATIONS
+
+We now show the practical benefits of our pairwise
+harmonics and their corresponding shape descriptors with
+three applications.
+Updating a pairwise harmonic is superlinear [28];
+however, computing the harmonic for every surface point
+pair would still be computational prohibitive. Therefore,
+surface sampling to identify a sufficient small number of
+good pairwise harmonics for specific applications is
+essential in our solutions. Our shape descriptors are defined
+on the diffusion path constrained by two points. Consequently, the isocurves extracted from different fields
+constrained by different point pairs can overlap with each
+other, (e.g., in Fig. 1, the isocurves from one leg to another
+leg overlap with those from one leg to an ear), leading to the
+
+VOL. 19,
+
+NO. 7, JULY 2013
+
+descriptors having redundancy geometry information. This
+characteristic allows sampling of only sparsely distributed
+points for applications like shape matching and skeletonization where isocurves tautly encircling the surface regions
+suffice. For symmetry axis computation, more samples are
+required to identify and validate possible candidate
+symmetry pairs.
+
+3.1 Intrinsic Reflectional Symmetry Axis
+Previous work on symmetry. Symmetry is one of the most
+fundamental phenomena in nature and man-made objects.
+It is also a crucial element for human recognition in many
+domains, such as arts, biology, mechanical design, and
+architecture [29], [30]. In computer graphics, symmetry has
+also been well examined and has been used in shape
+processing applications like remeshing [31], beautification
+[32], and shape editing [2].
+Previous approaches on symmetry computation can be
+divided into two classes. One class focuses on computing
+the explicit symmetry, especially the euclidean reflectional
+and translational symmetries [33], [34] or parts symmetry
+under rigid transformations [13]. The other class focuses on
+computing intrinsic shape symmetries (isometric homeomorphism between the shape surface and itself, nonrigid
+and possibly only partially) [8], [11], [12], [35].
+Recently, algorithms have been proposed to find
+structures that characterize intrinsic symmetries [36], [37].
+We also focus on computing such symmetry structures
+without explicitly establishing the point-to-point symmetries. We show that the pairwise harmonics can be naturally
+exploited to compute intrinsic reflectional symmetry axis as
+of Xu el al. [36]. In their method, a series of geometric filters
+were designed to first filter out redundant pairs and then a
+symmetry-support voting mechanism is employed to
+summarize the symmetry on mesh points and vote for the
+final symmetry axes. Promising results were obtained;
+however, it usually takes substantial time (up to hours) to
+compute intrinsic symmetries. As reported in their paper,
+the complexity of their algorithm is Oðn4 Þ where n is the
+sample size (typically 2k  10k).
+Our approach. Since the descriptors extracted from
+pairwise harmonics contain intrinsic symmetry information
+(Fig. 1 left), our main challenge here is to identify good
+candidate point pairs efficiently to reduce the search space.
+Exhaustive search over the entire model for possible
+good symmetry point pairs proves to be prohibitive given
+its Oðn4 log nÞ complexity. Hence, surface sampling is
+essential in reducing the search space at the outset. A naı̈ve
+sampling strategy may lead to potentially good candidates
+being missed out or too many error pairs introduced in the
+final symmetry computation. Our goal is to reduce the
+amount of computation during this search while still
+ensuring that prominent symmetry pairs can be identified.
+We leverage the fact that if a point pair is found to merit
+good intrinsic symmetry, the region along the field
+propagation path is likely to contain many good symmetry
+pairs. Hence, if a pair with good symmetry is found, the
+symmetry of the region along the path is well represented
+which significantly reduces the samples needed to validate
+the established symmetry as required in [14], allowing us to
+devise a simpler and more efficient method.
+
+Authorized licensed use limited to: ULAKBIM UASL - MIDDLE EAST TECHNICAL UNIVERSITY. Downloaded on April 12,2025 at 18:58:50 UTC from IEEE Xplore. Restrictions apply.
+
+ZHENG ET AL.: PAIRWISE HARMONICS FOR SHAPE ANALYSIS
+
+1175
+
+Fig. 3. The main flow of our intrinsic symmetry axis computation algorithm. Based on the vertex geodesic entropy [21] (a), we sample the surface
+(b) and define a pairwise harmonic for each valid point pair (c). We measure the symmetry of each point pair and let it vote for the symmetry axes.
+Votes are accumulated at surface faces (d); observe that those lying in the symmetry regions receive large amounts of votes (d). Final symmetry
+axes (three here) are extracted based on the votes (e).
+
+To benefit our goal of sampling potentially good
+symmetry pairs, we adopt a sampling strategy that utilizes
+the geodesic entropy proposed by Tevs et al. [21]. They
+define a likelihood of point i being equal to point j
+as follows:
+kgi gj k2
+
+ij ¼ e 22 ;
+
+ð3Þ
+
+where k:k denotes the L2 distance,  is the standard
+derivation, and gi is the geodesic descriptor of point i
+defined as the lengths of the geodesic rings propagating
+from point i at equal distances. We do not normalize gi and
+gj as did in [21] because we wish to generate as many
+distinct points as possible. For example, points on a hand
+have profiles of geodesic descriptors that are rather
+different from points on a foot, even though as limbs they
+have similar appearances. This observation leads to a
+probability function for each point. The geodesic entropy
+of a point i is defined as the entropy of the probability
+function in (3) [21]. Fig. 3a shows such an entropy map for
+the Snowman model. The geodesic descriptors possess the
+power of clearly distinguishing regions of different semantics (see the distinct regions (warm colored) in Fig. 3a),
+leading to potential symmetry regions having similar colors
+(note the similar colors in symmetry parts).
+We then employ a sampling strategy that strives to cover
+all prominent regions of the mesh while encouraging the
+points to span the entire mesh surface. The sampling
+method iteratively selects the point with the largest
+geodesic entropy value, while disallowing any point within
+a specified radius of already selected points. Fig. 3b shows
+the sampled points for the Snowmen model, which are
+distributed throughout the model and many of them are
+potential symmetry pairs.
+We now describe the pipeline of our algorithm for
+intrinsic symmetry identification (Fig. 3). First, we compute
+a set of points on the surface as described above, which we
+denote by . Second, we iterate through all point pairs ðp; qÞ
+from  and reject pairs that we consider uncorrelated using
+two geometric tests (the details of which will be described
+later). Denote the set of remaining point pairs by . Next,
+for each point pair p, q in , we compute a corresponding
+pairwise harmonic function (order of p and q is not
+important) and extract a uniformly sampled set of isocurves
+as described in Section 2. We measure the PIS of the point
+
+pair, denoted as &pq (defined below), and check if it is a good
+candidate of symmetric point pair. Finally, we employ a
+voting strategy similar to [36] to find the final symmetries.
+Instead of using surface points [36], we vote to the surface
+faces since the symmetry axes may not exactly pass through
+surface points.
+The two geometric tests that we use to reject point pairs
+are similarity test and geodesic distance test. For the
+similarity test, we use the geodesic descriptors of the two
+points defined above, i.e., gi and gj . We reject a pair of
+points if their distance ðgi ; gj Þ is larger than a threshold %
+(0.01 in our experiment). ð:Þ is defined as
+
+
+n gk  gk 
+1X
+ i
+j
+ðgi ; gj Þ ¼
+
+
+n k¼1 gki þ gkj 
+(n ¼ 16 is the number of geodesic rings [21]). To omit close
+point pairs, the geodesic distance test rejects a point pair if
+their geodesic distance is shorter than 1=5 of the maximum
+geodesic distance among any sampled pairs.
+We define the PIS between a pair of points ðp; qÞ, denoted
+&pq , as follows:
+  j Kþ1j 
+K=2 
+L dpq ; dpq
+;
+ð4Þ
+&pq ¼ j¼1 L rjpq ; rKþ1j
+pq
+where L is defined as
+Lðx; yÞ ¼ 1 þ
+
+jx  yj
+:
+xþy
+
+ð5Þ
+
+Such a definition introduces consistent penalty for intrinsic
+symmetry measurements. The value of &pq increases
+dramatically as the number of nonsymmetry isocurves
+rises. For example, if one corresponding pair of the
+isocurves has a large value of Lðx; yÞ, it will lead to an
+increase in the magnitude of the value of &pq . For a perfect
+symmetry point pair ðp; qÞ, we have &pq ¼ 1. We reject a
+point pair as a symmetry candidate if its &pq value is larger
+than a user-defined threshold  (2.0 in experiments).
+Before voting, we convolve all the computed PIS values
+by a Gaussian function to boost those pairs with strong
+0
+as
+symmetries. Specifically, we compute a new &pq
+2
+
+2
+
+0
+&pq
+¼ e&pq =ð2 Þ ;
+
+ð6Þ
+
+where  ¼ =2. For each candidate point pair, we compute
+its symmetry axis as in [36] and let the point pair vote to the
+
+Authorized licensed use limited to: ULAKBIM UASL - MIDDLE EAST TECHNICAL UNIVERSITY. Downloaded on April 12,2025 at 18:58:50 UTC from IEEE Xplore. Restrictions apply.
+
+1176
+
+IEEE TRANSACTIONS ON VISUALIZATION AND COMPUTER GRAPHICS,
+
+Fig. 4. More examples on partial intrinsic symmetry computation. Our
+method consistently locates the symmetry axes at desired regions.
+For the rightmost model, our method finds only one symmetry axis
+due to intersection with the other symmetry axes (see detailed
+discussion in Section 3.1). The middle model is coupled with
+30 percent Gaussian noise.
+
+axis curve by sending a score to the faces on the symmetry
+axis. Each mesh face can receive multiple votes if it is
+passed by multiple axes. Finally, the symmetry axes are
+iteratively selected using a greedy algorithm considering
+the average votes of all faces they pass through. We ignore a
+new axis curve if it intersects any previous selected ones.
+Results and evaluation. Fig. 3 shows a result of our
+algorithm. Note that the algorithm is able to find intrinsic
+symmetries using a relatively small set of sample points (we
+use 300 in this example). This demonstrates the strength of
+our pairwise descriptors in terms of both effectiveness and
+computational efficiency. Our algorithm runs at a much
+faster rate than the method of Xu et al. [14]. The whole
+process typically takes under 5 minutes for a sample rate of
+up to 500 vertices for moderate mesh size (30k), and the
+complexity basically grows quadratically with the sample
+size. We use the fast Choleskey factorization updating
+schemes as in [38] to speed up the computation of the
+harmonic fields.
+Fig. 4 shows some results from more challenging models.
+Our algorithm consistently locates symmetry axes in
+desired regions. For the menmento model, our method
+finds only one symmetry axis, even though there are three.
+This is because the three symmetry axes intersect each other
+and our greedy method simply ignores the other two. The
+interleaved strategy employed in [36] can solve this
+problem, but at the cost of a significant time complexity.
+As our algorithm works well for most models, for
+simplicity, we did not implement that strategy.
+It is interesting to note that only a relatively small set of
+samples (<1;000) usually suffices. This is because our
+sampling strategy is effective in locating potential symmetry points (Fig. 11). The pairwise harmonics also render the
+method simpler and more efficient. The symmetry information encoded in the isocurves along the propagation path
+lends itself to an effective way of measuring shape
+symmetry within a surface region. Such information serves
+naturally as symmetry evidence to a symmetry axis,
+without requiring any localized support voting scheme to
+validate a found symmetry as done in [36], hence
+significantly reduces the complexity.
+
+3.2 Matching Shape Extremities
+In this section, we describe our algorithm that uses the
+pairwise harmonics to establish a correspondence between
+
+VOL. 19,
+
+NO. 7, JULY 2013
+
+two sets of shape extremal points on two given shapes. The
+shapes may have rather different surface details as well as
+poses and may even be only partially matchable. After
+establishing a correspondence between the shape extremities, a denser correspondence can be found using the
+landmark algorithm of Tevs et al. [21].
+Previous work on shape correspondence. Finding a correspondence in a pair of models is a well-researched area. In
+general, shape correspondence is a more difficult problem
+than shape retrieval, since shape retrieval mainly seeks to
+measure the similarity between two shapes (e.g., by
+comparing shape descriptors in the same domains) while
+shape correspondence addresses the problem of establishing a one-to-one concrete mapping between two sets of
+shape points. Recently, various methods achieving compelling results have been proposed for finding correspondence between isometric shapes, shapes with different
+surface details and large deformations, or even only
+partially matchable shapes [10], [12], [39], [40], [41], [42],
+[43]. These methods commonly leverage low-dimensional
+spaces (e.g., conformal mappings [12]) or effective representations (e.g., shape skeleton [42]) to reduce exponential
+searching complexities, and subsequently employ efficient
+searching algorithms to narrow down the search space
+while retaining good mapping candidates. Correspondences are established either between a dense subset or
+complete set of surface points [10], [12], a sparse set of
+surface extreme points [41], [40], nodes on skeletons [42] or
+shape parts [43].
+Despite the complex matching frameworks, the underlying key ingredients of these matching systems are the
+descriptors and combinatorial measurements (e.g., transformation cost [10], [41]) to compare the similarities among
+the elements to be matched. Most of the above-mentioned
+methods employ rather complicated techniques and are
+time-consuming even when finding a correspondence for
+dozens of points [10], [41], [12]. The recent approach of Au
+et al. [42] gains a much faster speed for matching the ending
+and junction nodes of two skeletons. A search tree is
+iteratively spanned whose nodes eventually vote for the
+best correspondence. As a drawback, computing shape
+skeletons can be an overhead. Further, it often fails for
+shapes with no well-defined skeletons, such as tables or
+chairs in Fig. 8.
+Our approach. Our method finds correspondence between
+two sets of shape extreme points [41] (a typical size < 20).
+Let us denote the two sets of points as P ¼ fp1 ; p2 ; :::; pm g
+and Q ¼ fq1 ; q2 ; . . . ; qn g. Without loss of generality, we
+assume m  n.
+For each extreme point pi (qi ), we first compute a
+pairwise harmonic field from pi (qi ) to each other extreme
+point pj (qj ) and compute the set of descriptors from all
+these fields, denoted by Hi ¼ f:::; hij ; . . .gj6¼i , where hij is
+defined as follows:
+hij ¼ ðRij ; gij Þ:
+
+ð7Þ
+
+Here, Rij is the perimeter distribution vector in (1) and gij
+denotes the normalized geodesic distance from points i to j
+(normalized to the range ½0; 1 by the maximum geodesic
+distance among all pairs). We then define the point-to-point
+difference between two point pair p 2 P and q 2 Q, denoted
+
+Authorized licensed use limited to: ULAKBIM UASL - MIDDLE EAST TECHNICAL UNIVERSITY. Downloaded on April 12,2025 at 18:58:50 UTC from IEEE Xplore. Restrictions apply.
+
+ZHENG ET AL.: PAIRWISE HARMONICS FOR SHAPE ANALYSIS
+
+1177
+
+Fig. 5. Visualization of the feature-to-feature distance matrix for the two
+human shapes. Our pairwise descriptors have a strong distinguishing
+power to classify these features. For example, points on arms in one
+model are most similar to points on arms in the other model.
+
+by Dðp; qÞ, as the minimum distance between two sets of
+corresponding descriptors Hp and Hq . This computes the
+minimum sum of pairwise distances of any injective
+mappings between the two sets. We solve it using a fast
+implementation of the Hungarian algorithm [44], where the
+difference between any two hij s is defined by the distance
+metric E:
+Eðhij ; hkl Þ ¼
+
+K jrm  rm j
+1X
+jgM1 ði; jÞ  gM2 ðk; lÞj
+ij
+kl
+:
+m
+m þ M1
+K m¼1 rij þ rkl
+g ði; jÞ þ gM2 ðk; lÞ
+
+ð8Þ
+
+Fig. 5(right) visualizes the values of D(.) of two feature sets
+as a distance matrix, which clearly illustrates the discriminate power of the pairwise descriptors. In particular, one
+can see that the arms, legs, and heads are clearly classified
+(shown in similar blue colors).
+Now, we consider the correspondence problem. For any
+mapping between two subsets of P and Q, f : ði1 ; i2 ; . . . ;
+i Þ  P 7! ðj1 ; j2 ; . . . ; j Þ  Q, we define the mapping error
+(in terms of the set of descriptors defined at the relevant
+extreme points) as follows:
+f ¼
+
+
+
+X
+X
+
+Eðhik il ; hjk jl Þ:
+
+ð9Þ
+
+k¼1 l¼1;l6¼k
+
+Given the definition of , our task is to search through a
+space of possible mappings between different subsets of P
+and Q to find the best one. A naı̈ve search in the entire
+space clearly leads to exponential complexity [42]; hence,
+we first filter out obvious invalid mappings before
+searching (using the computed point-to-point difference
+Dð:Þ, see details below). Next, we formulate the searching
+as a priority-driven graph search problem. We let each
+point pair pi 2 P and qi 2 Q be a graph node and connect
+each pair of graph nodes by an edge to obtain a complete
+graph G (see an example in Fig. 6). A path in the graph then
+represents a possible correspondence mapping (e.g., the
+green path in Fig. 6). The goal of our algorithm is to find a
+best path in the graph.
+An exhaustive search for a best path is computationally
+prohibitive. Our goal of exploring all potential good paths is
+similar to the famous travelling salesman problem. We
+design an algorithm that operates like the well-known ant
+colony system (ACS) [45] and runs in polynomial time.
+More specifically, we start by placing one ant at each
+graph node and let them probe simultaneously. An ant on
+each graph node finds several possible nodes to probe in the
+
+Fig. 6. The graph model for our matching framework. Each pair of
+points corresponds to a graph node. The green path shows a
+possible correspondence.
+
+next step. Only those next possible nodes whose inclusion
+form paths that represent valid correspondences are considered. To limit the search space, at each node, we consider
+only the top k best quality nodes. The quality is measured as
+the path compatibility of the new node to all previously
+found nodes (i.e., by comparing Eð:Þs, see details below). The
+ants-probing process is summarized in Algorithm 1.
+Algorithm 1. Our ant probing algorithm.
+Require: The complete graph G formed from two point
+sets P and Q. Assume jP j ¼ m  n ¼ jQj.
+Ensure: A best graph path denoting a correspondence;
+1: Place an ant on each graph node;
+2: for each ant do
+3:
+while The ant still have possible nodes to go do
+4:
+Find the set of next top k quality nodes it can
+move to;
+5:
+if the set is not empty then
+6:
+move to one next node with the best quality;
+7:
+Compute the mapping error  of the path just
+probed and record the path if its length equals
+m and has the least  value among all paths
+probed so far;
+8:
+if   leastcost probed so far then
+9:
+move back to the previous node;
+10:
+end if
+11:
+else
+12:
+move back to the previous node;
+13:
+end if
+14:
+end while
+15: end for
+16: Find the least-cost graph path with length m among all
+ants, denoted as bestP ath;
+17: return bestP ath;
+Each ant probes in a DFS manner to first find a valid
+path, then it backtracks along the path to look for other
+possible paths that have not been probed. This is achieved
+by recording only the best k possible next nodes at each
+graph node of the path. Each ant records the best path (of
+length m) during probing, by measuring the mapping
+error  (9) of the current path. Probing into a specific
+node is terminated if the mapping error introduced by the
+node is already larger than the best mapping error found
+so far since  is monotonically increasing. The probing
+stops when an ant returns to its starting node and all its k
+best next nodes have been probed. Finally, the path with
+
+Authorized licensed use limited to: ULAKBIM UASL - MIDDLE EAST TECHNICAL UNIVERSITY. Downloaded on April 12,2025 at 18:58:50 UTC from IEEE Xplore. Restrictions apply.
+
+1178
+
+IEEE TRANSACTIONS ON VISUALIZATION AND COMPUTER GRAPHICS,
+
+VOL. 19,
+
+NO. 7, JULY 2013
+
+Fig. 7. Benchmark evaluation of our method on the animal data set of
+Kim et al. [12]. Our algorithm performs slightly worse than their
+blending method while being simpler and more efficient in finding the
+sparse correspondences.
+
+the best quality recorded among all ants is selected as the
+final correspondence.
+We apply several tests in our algorithm to reduce the
+search complexity. First, before graph construction, we filter
+out unrelated extremal point pairs by a similarity test. We
+omit ðpi ; qj Þ if the difference of their Dð; Þs is larger than a
+user-defined threshold  (0.9 in our experiments). Second,
+when finding the next possible node for an ant on a node,
+we perform the following pruning tests on each of its
+adjacent node ðpk ; ql Þ in G:
+If either k or l has already appeared in a previous
+node, we omit it. This ensures a 1:1 mapping and
+thus a valid correspondence.
+2. For each previous node ðpi ; qj Þ in the ant’s probed
+path, we check the path compatibility of pk  pi with
+ql  qj and disregard ðpk ; ql Þ if any Eðhij ; hkl Þ is
+greater than a threshold (0.7 in our experiments).
+3. If a pair passes the above two tests, we check the
+transformation error as defined in [42]. That is, we
+perform the T 4 spatial configuration pruning test
+that filters out configurations with high deformation
+cost (such as symmetry switch) by computing the
+transformation error when deforming one set of
+points to another, based on a given point-to-point
+mapping (refer to the paper for details).
+Note that in traditional ACS, each ant lays on every node
+of the path a certain amount of pheromone during probing,
+indicating the likelihood of the node being on a shortest
+path. The pheromone will have a certain probability to
+evaporate and the path with the most amount of pheromone will increasingly be more likely visited in later
+iterations and finally form an ideal shortest path (may not
+be the global solution). In our framework, we do not
+perform this task since the term Eð:Þ is path-dependent for
+different ants and hence cannot be aligned by a summarization procedure. In practice, we found our pruning
+strategies could significantly reduce the search space.
+Coupled with our effective cost function, our algorithm is
+able to find the solution that minimizes the mapping error
+very quickly.
+Results and evaluation. Fig. 8 shows some results of our
+correspondence algorithm. Observe that our algorithm is
+
+Fig. 8. Some correspondence results obtained using our framework. Our
+algorithm is able to produce good results for shapes with similar
+semantics but may differ in pose, geometry and be only partially
+matchable (e.g., Armadillo model).
+
+1.
+
+capable of handling shapes with very different geometry
+details as well as only partially matchable shapes. The
+examples include shapes with rather different poses (teddy
+and ants models), shapes with very different surface details
+or topologies (the two dinosaur models, dog and wolf, two
+hands, and table and chair), and shapes that are only
+partially matchable (two armadillo models). Our correspondence algorithm is tolerant to different shape poses and
+surface variation since the harmonic fields are robust to
+isometric deformations and the descriptors are computed at
+both global and local scales, hence are not sensitive to
+differences in local shape details. The descriptors extracted
+for each extreme point encode the shape variations along
+different propagation paths between the point and all other
+extreme points. Such shape information naturally distinguish points lying on different parts of the shape (e.g., a
+point on a hand from a point on the head in Fig. 5).
+We qualitatively analyze our correspondence algorithm
+using the most recent protocols of [12]. Specifically, we
+collect the animal data (51 meshes) as did in [12] and
+compute the sparse correspondence for each model with a
+randomly selected model (from the 51 animals, selfexclusive). We compare the results of our method with
+those of the blending method [12] and the Möbius voting
+method [10]. Fig. 7 shows the evaluation results. The
+geodesic error is computed as the average geodesic error to
+the ground-truth correspondences (measured in percentages). Our method performs slightly worse than the
+blending method and better than the method of Möbius
+voting in finding sparse correspondence. Note that here
+
+Authorized licensed use limited to: ULAKBIM UASL - MIDDLE EAST TECHNICAL UNIVERSITY. Downloaded on April 12,2025 at 18:58:50 UTC from IEEE Xplore. Restrictions apply.
+
+ZHENG ET AL.: PAIRWISE HARMONICS FOR SHAPE ANALYSIS
+
+1179
+
+Fig. 10. Any correspondence algorithms that purely rely on geometry of
+input shapes (including ours) may fail on such ambiguities.
+
+3.3
+
+Fig. 9. Correspondence results from the blending method [12] for some
+models in Fig. 8.
+
+the curve is slightly different from the ones shown in [12]
+since we are using random comparison. In experiments, we
+found the blending method performs very well for those
+animal models while our method sometimes generates error
+in matching small branches like ears or symmetries due to
+pose variations. We also apply their method on some
+complex models used in our experiments, with topological
+changes or missing information as shown in Fig. 9. It is
+interesting to observe that our method performs better than
+the blending method for models with large difference in
+both topology and geometry (chair-table), or twisted
+branches (the ants model), or even partially missing
+information (the Armadilos), which demonstrates the
+effective of the pairwise descriptors in measuring global
+shape characteristics. As for the Möbius voting method, we
+found that it does not work well for models with two large
+geometry differences, like a giraffe and a cat. The evaluation
+of our method is slightly better if accepting symmetry flips;
+this is because the deformation computation we employed
+[42] is not applied in a commonly embedded space (e.g.,
+with MDS); hence, if the shape undergoes large deformation
+(e.g., a man hugging himself), symmetry flips would be
+hard to recognize.
+Like many other correspondence algorithms, our method
+may fail when the desired correspondence depends more
+on the shape semantics rather than the shape geometry,
+such as the two dinosaurs shown in Fig. 10. Another
+limitation is that our algorithm can fail to identify a
+symmetry switch as shown in the right of Fig. 10 where a
+front-faced model is matched with a back-faced one. This is
+true since such a symmetry switch cannot be sensed by any
+purely intrinsic approaches. Nevertheless, our algorithm
+runs one to two orders of magnitude faster than the state-ofthe-art algorithm of [10], [41], typically taking under
+30 seconds to find the correspondences. For most examples,
+we find that only a small number of k suffices to find the
+best mapping. We used a sufficiently large number (k ¼ 30)
+for all models tested. A detailed evaluation of the parameter
+k is presented in Section 4.
+
+Simultaneous Skeletonization and
+Segmentation
+Previous work. Shape skeletonization can aid in finding a
+rigid segmentation of the underlying shape [46] while
+segmentation can be exploited to extract a skeleton [47],
+[48]. A large body of recent research has been devoted to
+mesh segmentation [49], [50], [51] and skeletonization [46],
+[52]. We refer readers to a survey on segmentation
+techniques by Shamir [53] and a short review by Tagliasacchi et al. [52] on recent skeletonization methods.
+Although shape skeletonization algorithms can often be
+easily extended to finding shape segmentation and vice
+versa, the method of Lien et al. [48] has been, to our
+knowledge, the only work that computes them simultaneously. It extracts a skeleton from the segmentation
+boundaries and iteratively refines the skeleton by further
+decomposition of the segmentation. We design a simple
+simultaneous decomposition and skeletonization algorithm
+that uses the pairwise harmonics. We show that, compared
+with their method, ours extracts skeletons that more
+resemble those obtained by rigid shape decomposition, with
+the junction nodes located at the branching surface and each
+skeletal branch corresponds to one rigid shape component.
+Our method. Our method is motivated by the dual roles of
+the isocurves. Each isocurve of a pairwise harmonic field
+encircles the local shape, capturing the cross-sectional
+profile. Connecting the centroids of the isocurves produces
+a skeletal segment (Fig. 11a). On the other hand, isocurves
+are also good candidates for segmentation boundaries.
+The outline of our method is shown in Fig. 11. We first
+sample the surface to obtain a sparse set of points that
+generate pairwise harmonic fields spanning the whole
+model. Connecting the centroids of isocurves of each field
+produces a skeletal segment. To obtain reliable skeletal
+segments from all pairwise harmonics, we first assign node
+rigidity at each skeletal node indicating whether that node
+lies within a rigid or branching part, and divide the skeletal
+segments at nodes with low rigidity. We then employ a
+greedy algorithm to select a set of disconnected prominent
+skeletal segments, forming a partial skeleton. These chosen
+skeletal segments induce an initial segmentation. Next, we
+leverage the shape segmentation to guide the completion of
+the skeleton. Specifically, we compute center nodes at
+junction segmentation regions and connect up the disconnected skeletal segments based on segmentation adjacency.
+Finally, the segmentation result is refined according to the
+completed skeletal structure.
+We employ the max-min sampling strategy [10] to get a
+set of sparsely distributed points, denoted by . These
+
+Authorized licensed use limited to: ULAKBIM UASL - MIDDLE EAST TECHNICAL UNIVERSITY. Downloaded on April 12,2025 at 18:58:50 UTC from IEEE Xplore. Restrictions apply.
+
+1180
+
+IEEE TRANSACTIONS ON VISUALIZATION AND COMPUTER GRAPHICS,
+
+VOL. 19,
+
+NO. 7, JULY 2013
+
+Fig. 11. Simultaneous shape segmentation and skeletonization. (a) We sample the shape to get a sparse set of points that generates pairwise
+harmonic fields that span the model. Isocurves extracted from each pairwise harmonic produces a potential skeletal segment. (b) Each node is
+assigned a rigidity score indicating its likelihood of lying on a rigid part (blue, green to red indicates increasing rigidity); (c) segments with the highest
+rigidity are selected as candidate skeletal segments; (d) an initial segmentation is obtained by cutting along the isocurves at two ends of each
+selected skeletal segments; (e) the skeleton is completed according to the segmentation adjacency; (f) the segmentation result is in turned refined
+according to the completed skeleton.
+
+points are mostly located at prominent shape parts (Fig. 11a)
+so that the resulting pairwise harmonics populate the entire
+mesh surface. For each point pair in , we compute a
+pairwise harmonic and connect the centers of all isocurves
+sequentially to form a skeletal segment (Fig. 11a). In this
+way, each point pair produces exactly one skeletal segment.
+Denote the set of all skeletal segments by  and the set of
+all center points (skeletal nodes) by C. Note that there may
+be more than one skeletal segment corresponding to a
+specific shape component (e.g., arm in (Fig. 11) extracted
+from different fields. We define the node rigidity of each
+skeletal node j 2 C as follows:
+j ¼
+
+maxf 1 ; 2 ; 3 g
+;
+1þ 2þ 3
+
+ð10Þ
+
+where k is the eigenvalue of the kth principle component
+computed on a neighborhood of node j. For this purpose,
+we use all points (2 C) within a sphere centered at node j
+whose radius equals to the radius of the associated
+isocurve (defined as perimeter divided by 2 ). A node is
+defined to be nonrigid if its value is smaller than 0.9.
+Fig. 11b shows all the skeletal nodes, with the colors blue,
+green to red indicating increasing rigidity. One can see that
+nonrigid nodes are mostly located in the branching parts
+of the shape.
+Next, for each skeletal segment in , we divide it into
+subsegments at each nonrigid node, resulting in a larger set
+0 of segments. For example, the single skeletal segment in
+Fig. 11a would be divided into three subsegments if there
+are two nonrigid nodes. We assign a score  to each
+resulting segment s indicating its likelihood of being a
+constituent of the final skeleton. That is,
+s ¼
+
+s  ls ;
+
+ð11Þ
+
+where s denotes the segment rigidity, averaged over all the
+nodes on that segment, and ls is the segment length. To
+construct the initial partial skeleton, we iterate through all
+the segments in 0 , each time selecting the segment with
+the highest . We omit any new segment that overlaps with
+any already selected one, thereby eliminating nearby
+
+skeletal segments (e.g., only one segment that run along
+an arm is selected). Fig. 11c shows the selected skeletal
+segments. Note that each segment corresponds to a rigid
+shape component, while most nonrigid nodes are in the
+junction regions.
+The selected skeletal segments induces an initial shape
+segmentation. Specifically, we partition the mesh using the
+isocurves associated with the two end nodes of each skeletal
+segment (Fig. 11c). This produces a segmentation where
+each skeletal segment corresponds to a major shape
+component, and the remainder components correspond to
+either junctions or extrema of a skeleton (Fig. 11d). Next,
+to complete the skeleton, we simply compute the centers of
+components corresponding to junction or extrema nodes
+and connect these centers to adjacent skeletal segments
+according to the segmentation adjacency (Fig. 11e).
+Finally, we revert to segmentation refinement. First, we
+merge a component that corresponds to a skeletal end point
+(e.g., hand in Fig. 11d) to its sole adjacent component. We
+then exploit the constructed skeleton for further segmentation refinement at junction parts. In particular, we consider
+each skeletal segment that is incident to two junction nodes
+(e.g., the body part shown in blue in Fig. 11) and try
+merging its associated component with the two adjacent
+components (e.g., the blue body part is merged with its
+adjacent components corresponding to two junctions
+nodes). This process is repeated by selecting the skeletal
+segments with the largest component volume until no
+further merging is possible. If any component is merged
+with a junction node, the junction node is tagged and
+removed from further consideration. Fig. 11f shows the
+final segmentation. In addition, Fig. 12 shows more
+skeletonization and segmentation results. Observe that
+the use of the rigidity term and a skeleton in guiding the
+segmentation produces a partition that mostly agrees with
+the shape’s rigidity without oversegmentation. Hence, our
+method generally conforms more to the shape’s articulatory
+structure whereas most state-of-the-art segmentation methods tend not to recover such information.
+Results and evaluation. Comparing with the mesh contraction algorithm [46], we find that our skeletonization
+
+Authorized licensed use limited to: ULAKBIM UASL - MIDDLE EAST TECHNICAL UNIVERSITY. Downloaded on April 12,2025 at 18:58:50 UTC from IEEE Xplore. Restrictions apply.
+
+ZHENG ET AL.: PAIRWISE HARMONICS FOR SHAPE ANALYSIS
+
+Fig. 12. Segmentation and skeletonization results of some representative models.
+
+results are comparable for many models. In some cases,
+when a component does not merit a good principle axis,
+our algorithm can fail to identify a branch (e.g., the body
+part of the teddy shown in Fig. 13). In such cases, the
+segmentation results are also affected (see the segmentation of teddy where the body and head form one
+component). Nevertheless, our algorithm is simpler and
+more efficient than the method of Au et al. [46] which
+involves iteratively solving a large linear system. Note that,
+like their method, our algorithm operates directly on mesh
+surfaces and preserves shape topology.
+For segmentation, we quantitatively evaluate our results
+using the protocol of Chen et al. [54]. Since our segmentation
+algorithm builds upon skeleton extraction, we exclude the
+head, vase, fish and CAD categories whose models do not
+have good definition of skeletons. Our method is capable
+of handling fairly complex models such as the cow model
+(Fig. 12) and the menmento model (Fig. 13) and can deal
+with models with different topologies (the chair model).
+Observe that our algorithm leads to segmentation results
+that divide a shape into near-rigid components, thanks to
+the support of the underlying shape skeleton. From the
+evaluation results (Figs. 14 and 15), we find that our simple
+method produces results comparable with state-of-the-art
+
+Fig. 13. Our skeletonization algorithm generates comparable results to
+the method of Au et al. [46] for most models. However, when no
+obvious principle axis exists in a component, our method may fail
+to locate a skeletal segment (e.g., the bottom piece of the menmento
+model), leading to a degraded result. The generated skeleton
+influences the segmentation results (e.g., the body of the teddy bear
+is not segmented from its head). Images in blue frames are results
+from the method of Au et al.
+
+1181
+
+Fig. 14. Quantitative analysis of our segmentation results using
+protocols of Chen et al. [54]. Our method performs slightly better than
+the state-of-the-art methods while being much simpler and efficient.
+
+algorithms but is much faster. It typically takes under
+30 seconds to segment a model. Since our methods are built
+on harmonic fields, which are not sensitive to surface noise
+and isometric deformation, our results are robust to surface
+noise, tessellations, and poses [38].
+
+4
+
+PARAMETERS
+
+In this section, we briefly examine the parameters used in
+the three applications.
+Intrinsic symmetry detection. The similarity test used in
+our intrinsic symmetry computation method is to filter out
+uncorrelated point pairs before the harmonics computation.
+This is mainly for efficiency and does not affect the final
+results if we increase the value, i.e., allow more pairs to pass
+through, because they will finally be filtered out by the
+user-defined symmetry parameter . The parameter 
+controls the number of voting candidate point pairs.
+Although increasing its value may lead to errors in the
+final symmetry selection due to more undesired pairs
+participating in the voting, we found that the results tend to
+be stable against this parameter since true symmetry axes
+will still be more likely to receive more votes (Fig. 16). The
+range of ½2; 4 produces satisfactory results.
+
+Fig. 15. By class rand index error from protocols of Chen et al. [54]. Our
+method generally performs better than the state-of-the-art methods. For
+the teddy category, our method performs worse due to the small
+branching parts of the teddy models which can lead to degraded
+skeletons (see Fig. 13) since we are using a fixed rigidity threshold.
+
+Authorized licensed use limited to: ULAKBIM UASL - MIDDLE EAST TECHNICAL UNIVERSITY. Downloaded on April 12,2025 at 18:58:50 UTC from IEEE Xplore. Restrictions apply.
+
+1182
+
+IEEE TRANSACTIONS ON VISUALIZATION AND COMPUTER GRAPHICS,
+
+VOL. 19,
+
+NO. 7, JULY 2013
+
+TABLE 1
+Number of ks in Finding the Best Solutions
+
+Fig. 16. Increasing the value of  does not affect the results significantly
+since true symmetry axes are more likely to receive more votes.
+
+Shape extremities matching. For our correspondence algorithm, we used five parameters during graph construction
+and the pruning tests. The user-defined threshold  and the
+geodesic test parameter are to filter out invalid nodes at
+the stage of graph construction. A small value of  can
+improve the efficiency by reducing the graph size but may
+lead to potential candidate pairs being rejected if two
+shapes have large variations such as the two dinosaurs
+shown in Fig. 8. A large value allows more pairs to pass the
+test (hence allowing matching of shapes with very different
+geometry) but also decreases the efficiency and may
+introduce errors in the final mapping. We find that values
+between 0:8  0:95 tend to give satisfactory results. As for
+the value of the spatial configuration parameter (T4) used in
+our pruning test during probing, we simply set it to the
+same range as the one used in [46].
+The last parameter used in our correspondence algorithm is the searching parameter k. When k ¼ 1, each ant
+only probes the current best possible node hence may easily
+lead to local minima. When k ¼ jGj, the entire space is
+explored. Our experiments show that the algorithm converges rather quickly to the global optimum, in other words,
+a small k suffices to lead the algorithm to the best solution.
+Table 1 shows the value of k used to find the best solution
+for the models in Fig. 8. It can be noticed that surfaces with
+large variations and many branches may require a larger
+value of k to find the best solution. We found that a k value
+smaller than 10 could already lead to a good correspondence solution for most models; for complex ones such as
+the ants model, a small k value produces results up to some
+symmetry switches. Hence, in our experiments, we set k to a
+fixed number of 30 for all our examples.
+Segmentation and skeletonization. The only parameter used
+in our segmentation and skeletonization method is the
+threshold to define a stable node. For consistency, we use
+0.9 for all our examples in the paper and for the evaluation.
+This value of the parameter has rather minor impact on the
+final results. Specifically, smaller values of this parameter
+can cause more nodes to be classified as being stable, which
+can be helpful in some cases to identify less prominent
+branches, such as the body of the teddy bear shown in
+Fig. 13. On the other hand, larger values lead to less noisy
+results. We found that a value between 0.85-0.95 produces
+satisfactory results.
+All applications. An important parameter used in all three
+applications is the number of isocurves extracted from each
+harmonic field. Naturally, it would be desirable to sample a
+number of isocurves according to the geodesic distance of
+the two points. However, for simplicity, we used a constant
+number for each application. For symmetry computation
+and shape matching applications, we found that a small set
+
+of isocurves suffices to render both algorithms robust, and
+we use K ¼ 16. For segmentation and skeletonization, to
+faithfully locate desired skeletal nodes in all surface regions,
+we sample 50 isocurves per harmonic field.
+
+5
+
+CONCLUSION AND FUTURE WORK
+
+In conclusion, this paper introduces a simple and effective
+shape analysis tool based on point pairs on the surface.
+Unlike previous shape descriptors that are derived mostly
+based on analysis around individual points, in this work,
+we define a set of shape descriptors from pairwise
+harmonics which is rather simple yet capable of capturing
+important shape geometry and global shape structures. We
+show the benefits of the pairwise analysis framework with
+three applications.
+Though the concept of harmonic fields has been widely
+adopted by the geometry community, we exploit it in a
+rather different context, i.e., in a pairwise manner. We
+believe such a coupled way of analyzing a shape will open
+up new possibilities for shape analysis in the future. Indeed,
+it is interesting to note that in the independent parallel work
+of Xu et al. [55] and Kaick et al. [56], point pairs have been
+effectively examined and employed for shape analysis. In
+the work of Xu et al. [55], intrinsic symmetries at various
+scales are detected using point-pair symmetry support
+voting and clustering and in the work of Kaick et al. [56],
+fuzzy geodesics between point pairs are exploited for
+partial shape correspondence and shape retrieval [56]. In
+addition to this, we believe such a pairwise analysis method
+can be naturally applied to more applications such as shape
+coanalysis and part recognition.
+The pairwise analysis is capable of sensing the shape
+semantics, which is exploited for the first time in this work.
+This capability will encourage us to explore more on shape
+analysis tools that can capture shape semantics in the
+future. For example, it would be interesting to explore the
+extension of pairwise analysis to a multiway analysis,
+which has the potential of revealing even richer information
+in the surface. A natural application is shape matching.
+Finally, we wish to explore means to automate the choice of
+points in the point pairs in various applications.
+
+ACKNOWLEDGMENTS
+The authors thank the anonymous reviewers for their
+constructive comments, Kevin Xu for providing the models
+for symmetry axes extraction, Xin Zhao and Han Liu for their
+help in the evaluation with the correspondence benchmark.
+This work was supported in part by grants from the Hong
+Kong Research Grant Council (Project Nos. GRF619611 and
+GRF619012). Eugene Zhang was partially supported by
+National Science Foundation Award IIS-0917308.
+
+Authorized licensed use limited to: ULAKBIM UASL - MIDDLE EAST TECHNICAL UNIVERSITY. Downloaded on April 12,2025 at 18:58:50 UTC from IEEE Xplore. Restrictions apply.
+
+ZHENG ET AL.: PAIRWISE HARMONICS FOR SHAPE ANALYSIS
+
+REFERENCES
+[1]
+[2]
+[3]
+
+[4]
+[5]
+[6]
+[7]
+[8]
+[9]
+[10]
+[11]
+[12]
+[13]
+[14]
+[15]
+[16]
+[17]
+[18]
+
+[19]
+[20]
+[21]
+[22]
+[23]
+[24]
+[25]
+[26]
+
+A.D. Bimbo and P. Pala, “Content-Based Retrieval of 3D Models,”
+ACM Trans. Multimedia Computing Comm. Applications, vol. 2,
+pp. 20-43, 2006.
+R. Gal, O. Sorkine, N.J. Mitra, and D. Cohen-Or, “iWIRES: An
+Analyze-and-Edit Approach to Shape Manipulation,” ACM Trans.
+Graphics, vol. 28, no. 3, article 33, pp. 1-10, 2009.
+J.-P. Vandeborre, V. Couillet, and M. Daoudi, “A Practical
+Approach for 3D Model Indexing by Combining Local and Global
+Invariants,” Proc. First Int’l Symp. 3D Data Processing Visualization
+and Transmission (3DPVT’02), pp. 644-647, 2002.
+C.H. Lee, A. Varshney, and D.W. Jacobs, “Mesh Saliency,” Proc.
+ACM SIGGRAPH, pp. 659-666, 2005.
+A.E. Johnson and M. Hebert, “Using Spin Images for Efficient
+Object Recognition in Cluttered 3D Scenes,” IEEE Trans. Pattern
+Analysis Machine Intelligence, vol. 21, no. 5, pp. 433-449, May 1999.
+L. Shapira, A. Shamir, and D. Cohen-Or, “Consistent Mesh
+Partitioning and Skeletonization Using the Shape Diameter
+Function,” Visual Computer, vol. 24, no. 4, pp. 249-259, 2008.
+J. Sun, M. Ovsjanikov, and L. Guibas, “A Concise and Provably
+Informative Multi-Scale Signature Based on Heat Diffusion,” Proc.
+Eurographics Symp. Geometry Processing (SGP), pp. 1383-1392, 2009.
+M. Ovsjanikov, Q. Mérigot, F. Mémoli, and L. Guibas, “One Point
+Isometric Matching with the Heat Kernel,” Proc. Eurographics
+Symp. Geometry Processing (SGP), vol. 29, no. 5, pp. 1555-1564, 2010.
+T.K. Dey, K. Li, C. Luo, P. Ranjan, I. Safa, and Y. Wang, “Persistent
+Heat Signature for Pose-Oblivious Matching of Incomplete
+Models,” Computer Graphics Forum, vol. 29, pp. 1545-1554, 2010.
+Y. Lipman and T. Funkhouser, “Möbius Voting for Surface
+Correspondence,” Proc. ACM SIGGRAPH, pp. 72:1-72:12, 2009.
+V.G. Kim, Y. Lipman, X. Chen, and T. Funkhouser, “Mobius
+Transformations for Global Intrinsic Symmetry Analysis,” Computer Graphics Forum, 2010.
+V.G. Kim, Y. Lipman, and T. Funkhouser, “Blended Intrinsic
+Maps,” Trans. Graphics, vol. 30, article 79, 2011.
+N.J. Mitra, L. Guibas, and M. Pauly, “Partial and Approximate
+Symmetry Detection for 3D Geometry,” ACM Trans. Graphics,
+vol. 25, no. 3, pp. 560-568, 2006.
+K. Xu, H. Zhang, D. Cohen-Or, and Y. Xiong, “Dynamic Harmonic
+Fields for Surface Processing,” Computers and Graphics, vol. 33,
+pp. 391-398, 2009.
+E. Zhang, K. Mischaikow, and G. Turk, “Feature-Based Surface
+Parameterization and Texture Mapping,” ACM Trans. Graphics,
+vol. 24, no. 1, pp. 1-27, 2005.
+E. Zhang and G. Turk, “Visibility-Guided Simplification,” Proc.
+Conf. Visualization, pp. 267-274, 2002.
+H. Sundar, D. Silver, N. Gagvani, and S. Dickinson, “Skeleton
+Based Shape Matching and Retrieval,” Proc. Shape Modeling Int’l,
+p. 130, 2003.
+C.B. Akgul, B. Sankur, Y. Yemez, and F. Schmitt, “3D Model
+Retrieval Using Probability Density-Based Shape Descriptors,”
+IEEE Trans. Pattern Analysis and Machine Intelligence, vol. 31, no. 6,
+pp. 1117-1133, June 2009.
+J. Tangelder and R. Veltkamp, “A Survey of Content Based 3D
+Shape Retrieval Methods,” Proc. Shape Modeling Int’l, pp. 145-156,
+2004.
+M. Ben-Chen and C. Gotsman, “Characterizing Shape using
+Conformal Factors,” Proc. First Eurographics Conf. 3D Object
+Retrieval (3DOR), pp. 1-8, 2008.
+A. Tevs, A. Berner, M. Wand, I. Ihrke, and H.-P. Seidel,
+“Intrinsic Shape Matching by Planned Landmark Sampling,”
+Proc. Eurographics Conf., pp. 543-552, 2011.
+T. Gatzke, C. Grimm, M. Garland, and S. Zelinka, “Curvature
+Maps for Local Shape Comparison,” Proc. Shape Modeling Int’l,
+pp. 244-256, 2005.
+V. Kraevoy, A. Sheffer, and C. Gotsman, “Matchmaker: Constructing Constrained Texture Maps,” Proc. ACM SIGGRAPH,
+pp. 326-333, 2003.
+R. Zayer, C. Rössl, Z. Karni, and H.-P. Seidel, “Harmonic
+Guidance for Surface Deformation,” Computer Graphics Forum,
+vol. 24, no. 3, pp. 601-609, 2005.
+S. Dong, P.-T. Bremer, M. Garland, V. Pascucci, and J.C. Hart,
+“Spectral Surface Quadrangulation,” ACM Trans. Graphics, vol. 25,
+pp. 1057-1066, July 2006.
+M. Meyer, M. Desbrun, P. Schröder, and A.H. Barr, “Discrete
+Differential-Geometry Operators for Triangulated 2-Manifolds,”
+Visualization and Mathematics III, pp. 35-57, Springer, 2002.
+
+1183
+
+[27] M. Wardetzky, S. Mathur, F. Kälberer, and E. Grinspun, “Discrete
+Laplace Operators: No Free Lunch,” Proc. Fifth Eurographics Symp.
+Geometry Processing, pp. 33-37, 2007.
+[28] T. Davis, User Guide for CHOLMOD: A Sparse Cholesky Factorization
+and Modification Package, 2008.
+[29] H. Weyl, Symmetry. Princeton Univ. Press, 1983.
+[30] M. Leyton, A Generative Theory of Shape. Springer-Verlag, 2001.
+[31] J. Podolak, A. Golovinskiy, and S. Rusinkiewicz, “SymmetryEnhanced Remeshing of Surfaces,” Proc. Fifth Eurographics Symp.
+Geometry Processing, pp. 235-242, 2007.
+[32] N.J. Mitra, L. Guibas, and M. Pauly, “Symmetrization,” ACM
+Trans. Graphics, vol. 26, no. 3, article 63, pp. 1-8, 2007.
+[33] M. Kazhdan, B. Chazelle, D. Dobkin, T. Funkhouser, and S.
+Rusinkiewicz, “A Reflective Symmetry Descriptor for 3D Models,” Algorithmica, vol. 38, pp. 201-225, 2003.
+[34] J. Podolak, P. Shilane, A. Golovinskiy, S. Rusinkiewicz, and T.
+Funkhouser, “A Planar-Reflective Symmetry Transform for 3D
+Shapes,” ACM Trans. Graphics, vol. 25, pp. 549-559, 2006.
+[35] D. Raviv, A.M. Bronstein, M.M. Bronstein, and R. Kimmel,
+“Symmetries of Non-Rigid Shapes,” Proc. IEEE 11th Int’l Conf.
+Computer Vision, pp. 1-7, 2007.
+[36] K. Xu, H. Zhang, A. Tagliasacchi, L. Liu, G. Li, M. Meng, and
+Y. Xiong, “Partial Intrinsic Reflectional Symmetry of 3D
+Shapes,” ACM Trans. Graphics, vol. 28, pp. 138:1-138:10, 2009.
+[37] Y. Lipman, X. Chen, I. Daubechies, and T. Funkhouser, “Symmetry Factored Embedding and Distance,” ACM Trans. Graphics,
+vol. 29, article 103, July 2010.
+[38] Y. Zheng and C.-L. Tai, “Mech Decomposition with CrossBoundary Brushes,” Computer Graphics Forum, vol. 29, no. 2,
+pp. 527-535, 2010.
+[39] F. Mémoli and G. Sapiro, “A Theoretical and Computational
+Framework for Isometry Invariant Recognition of Point Cloud
+Data,” Foundations Computational Math., vol. 5, no. 3, pp. 313-347,
+2005.
+[40] M.M. Bronstein, A.M. Bronstein, and R. Kimmel, Numerical
+Geometry of Non-Rigid Shapes. Springer-Verlag, 2008.
+[41] H. Zhang, A. Sheffer, D. Cohen-Or, Q. Zhou, O. van Kaick, and A.
+Tagliasacchi, “Deformation-Drive Shape Correspondence,” Computer Graphics Forum, vol. 27, no. 5, pp. 1431-1439, 2008.
+[42] O.K.-C. Au, C.-L. Tai, D. Cohen-Or, Y. Zheng, and H. Fu, “Electors
+Voting for Fast Automatic Shape Correspondence,” Computer
+Graphics Forum, vol. 29, no. 2, pp. 645-654, 2010.
+[43] O. van Kaick, A. Tagliasacchi, O. Sidi, H. Zhang, D. Cohen-Or,
+L. Wolf, and G. Hamarneh, “Prior Knowledge for Shape
+Correspondence,” Computer Graphics Forum, vol. 30, no. 2,
+pp. 553-562, 2011.
+[44] H.W. Kuhn, “The Hungarian Method for the Assignment
+Problem,” Naval Research Logistics, vol. 52, no. 2, pp. 7-21, 2005.
+[45] M. Dorigo and L. Gambardella, “Ant Colony System : A
+Cooperative Learning Approach to the Traveling Salesman
+Problem,” IEEE Trans. Evolutionary Computation, vol. 1, no. 1,
+pp. 53-66, Apr. 1997.
+[46] O.K.-C. Au, C.-L. Tai, H.-K. Chu, D. Cohen-Or, and T.-Y. Lee,
+“Skeleton Extraction by Mesh Contraction,” ACM Trans. Graphics,
+vol. 27, no. 3, article 44, 2008.
+[47] S. Katz and A. Tal, “Hierarchical Mesh Decomposition using
+Fuzzy Clustering and Cuts,” ACM Trans. Graphics, vol. 22, pp. 954961, 2003.
+[48] J.-M. Lien, J. Keyser, and N.M. Amato, “Simultaneous Shape
+Decomposition and Skeletonization,” Proc. ACM Solid and Physical
+Modeling Symp. (SPM ’06), pp. 219-228, 2006.
+[49] S. Katz, G. Leifman, and A. Tal, “Mesh Segmentation using
+Feature Point and Core Extraction,” Visual Computer, vol. 21,
+pp. 649-658, 2005.
+[50] A. Golovinskiy and T. Funkhouser, “Randomized Cuts for 3D
+Mesh Analysis,” ACM Trans. Graphics, article 145, pp. 1-12, 2008.
+[51] E. Kalogerakis, A. Hertzmann, and K. Singh, “Learning 3D Mesh
+Segmentation and Labeling,” ACM Trans. Graphics, vol. 29, no. 3,
+article 102, 2010.
+[52] A. Tagliasacchi, H. Zhang, and D. Cohen-Or, “Curve Skeleton
+Extraction from Incomplete Point Cloud,” ACM Trans. Graphics,
+vol. 28, no. 3, pp. 71:1-71:9, 2009.
+[53] A. Shamir, “A Survey on Mesh Segmentation Techniques,”
+Computer Graphics Forum, vol. 27, no. 6, pp. 1539-1556, 2008.
+[54] X. Chen, A. Golovinskiy, and T. Funkhouser, “A Benchmark for
+3D Mesh Segmentation,” ACM Trans. Graphics, vol. 28, pp. 1-12,
+2009.
+
+Authorized licensed use limited to: ULAKBIM UASL - MIDDLE EAST TECHNICAL UNIVERSITY. Downloaded on April 12,2025 at 18:58:50 UTC from IEEE Xplore. Restrictions apply.
+
+1184
+
+IEEE TRANSACTIONS ON VISUALIZATION AND COMPUTER GRAPHICS,
+
+[55] K. Xu, H. Zhang, W. Jiang, R. Dyer, Z. Cheng, L. Liu, and B. Chen,
+“Multi-Scale Partial Intrinsic Symmetry Detection,” ACM Trans.
+Graphics, vol. 31, no. 6, article 181, 2012.
+[56] O. van Kaick, H. Zhang, and G. Hamarneh, “Bilateral Maps for
+Partial Matching,” Computer Graphics Forum, 2013.
+Youyi Zheng received the BSc and MSc
+degrees in mathematics both from the Zhejiang
+University and the PhD degree from the Hong
+Kong University of Science and Technology. He
+is a postdoc at the Geometric Modeling and
+Scientific Visualization Center, King Abdullah
+University of Science and Technology. His
+research interests include interactive techniques, digital geometric processing, computer
+graphics and computer vision.
+
+Chiew-Lan Tai received the BSc degree in
+mathematics from the University of Malaya, the
+MSc degree in computer and information
+sciences from the National University of Singapore, and the DSc degree in information
+science from the University of Tokyo. She is
+currently an associate professor of computer
+science at the Hong Kong University of Science
+and Technology. Her research interests include
+geometry processing, computer graphics, and
+
+VOL. 19,
+
+NO. 7, JULY 2013
+
+Eugene Zhang received the PhD degree in
+computer science from the Georgia Institute of
+Technology in 2004. He is currently an associate
+professor at Oregon State University, where he
+is a member of the School of Electrical Engineering and Computer Science. During part of
+2011 and 2012, he was a guest professor at the
+Free University of Berlin and the Max-PlanckInstitute in Informatics. His research interests
+include computer graphics, scientific visualization, geometric modeling, and computational topology. He received the
+National Science Foundation CAREER award in 2006. He is a senior
+member of the IEEE and the ACM.
+Pengfei Xu received the BSc degree in mathematics from Zhejiang University. He is currently
+working toward the PhD degree in the Department of Computer Science and Engineering,
+Hong Kong University of Science and Technology. His research interests include digital geometric processing, interactive techniques and
+computer graphics.
+
+. For more information on this or any other computing topic,
+please visit our Digital Library at www.computer.org/publications/dlib.
+
+interactive techniques.
+
+Authorized licensed use limited to: ULAKBIM UASL - MIDDLE EAST TECHNICAL UNIVERSITY. Downloaded on April 12,2025 at 18:58:50 UTC from IEEE Xplore. Restrictions apply.
+
+
