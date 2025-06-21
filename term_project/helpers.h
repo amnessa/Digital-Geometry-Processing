@@ -26,6 +26,18 @@ class SoIndexedFaceSet;
 #include <Eigen/SparseCholesky>
 #include <Eigen/SparseLU>
 
+// Include libigl headers for robust geometry processing
+#include <igl/cotmatrix.h>
+#include <igl/harmonic.h>
+#include <igl/massmatrix.h>
+#include <igl/boundary_facets.h>
+#include <igl/slice.h>
+#include <igl/avg_edge_length.h>
+#include <igl/heat_geodesics.h>
+#include <igl/exact_geodesic.h>
+#include <igl/per_vertex_normals.h>
+#include <igl/per_face_normals.h>
+
 #include "Mesh.h"
 
 // Forward declarations
@@ -40,10 +52,13 @@ class PairwiseHarmonics {
 private:
     // The mesh we're working with
     Mesh* mesh;
-    
+
     // Sparse matrix representing the cotangent Laplacian
     Eigen::SparseMatrix<double> L;
-    
+
+    // Mass matrix for the mesh
+    Eigen::SparseMatrix<double> M;
+
     // Flag indicating if the Laplacian has been computed
     bool laplacianComputed;
 
@@ -51,12 +66,20 @@ private:
     Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> laplacianSolver; // Use SimplicialLDLT
     bool solverComputed; // Flag to track if solver is ready
 
+    // Mesh data in libigl format
+    Eigen::MatrixXd V; // Vertices
+    Eigen::MatrixXi F; // Faces
+    bool meshDataComputed;
+
     // Helper methods
     double calculateCotangent(const Eigen::Vector3d& a, const Eigen::Vector3d& b);
     double calculateAngle(const Eigen::Vector3d& a, const Eigen::Vector3d& b);
     double computeTriangleArea(const Eigen::Vector3d& v1, const Eigen::Vector3d& v2, const Eigen::Vector3d& v3);
     double computeVoronoiArea(int vertexIdx);
-    
+
+    // New libigl-based helper methods
+    bool prepareMeshDataForLibigl();
+
 public:
     /**
      * Constructor
@@ -66,21 +89,37 @@ public:
     PairwiseHarmonics(Mesh* m); // Remove the inline definition body {}
 
     /**
-     * Compute the cotangent Laplacian matrix for the mesh
+     * Compute the cotangent Laplacian matrix for the mesh using libigl
+     * This provides more robust computation than manual implementation
+     * @return True if computation was successful
+     */
+    bool computeCotangentLaplacianLibigl();
+
+    /**
+     * Compute the cotangent Laplacian matrix for the mesh (original implementation)
      * This implements the cotangent formulation of the Laplace-Beltrami operator
      * @return True if computation was successful
      */
     bool computeCotangentLaplacian();
-    
+
     /**
-     * Compute the pairwise harmonic function between two vertices
+     * Compute the pairwise harmonic function between two vertices using libigl
+     * This uses libigl's harmonic function solver for more robust computation
+     * @param vertex_p_idx Index of the first boundary vertex (f=0)
+     * @param vertex_q_idx Index of the second boundary vertex (f=1)
+     * @return Vector of harmonic function values for each vertex
+     */
+    Eigen::VectorXd computePairwiseHarmonicLibigl(int vertex_p_idx, int vertex_q_idx);
+
+    /**
+     * Compute the pairwise harmonic function between two vertices (original implementation)
      * Solves the Laplace equation with Dirichlet boundary conditions
      * @param vertex_p_idx Index of the first boundary vertex (f=0)
      * @param vertex_q_idx Index of the second boundary vertex (f=1)
      * @return Vector of harmonic function values for each vertex
      */
     Eigen::VectorXd computePairwiseHarmonic(int vertex_p_idx, int vertex_q_idx);
-    
+
     /**
      * Visualize the harmonic field on the mesh
      * @param field Vector of harmonic function values
@@ -93,7 +132,7 @@ public:
      * Computes the total length of the iso-curve for a given value in the harmonic field.
      * Uses a simplified approach by summing segment lengths within triangles.
      * @param field The computed harmonic field (vector of values per vertex).
-     * @param isoValue The target value for the iso-curve (between 0 and 1). 
+     * @param isoValue The target value for the iso-curve (between 0 and 1).
      * @return The total length of the iso-curve segments.
      */
     double computeIsoCurveLength(const Eigen::VectorXd& field, double isoValue);
@@ -106,7 +145,7 @@ public:
      */
     Eigen::VectorXd computeRDescriptor(const Eigen::VectorXd& field, int numSamplesK);
 
-    /** 
+    /**
      * Computes the D descriptor (average geodesic distance distribution) for a given harmonic field.
      *  Requires geodesic distance from the source (p) and target (q) vertices.
      * @param vertex_p_idx Index of the source vertex p (field value 0).
@@ -128,9 +167,7 @@ public:
     * @param D_qp D descriptor for the harmonic field f_qp.
     * @return The scalar PIS score. Higher values indicate better symmetry.
     */
-   double computePIS(const Eigen::VectorXd& R_pq, const Eigen::VectorXd& D_pq, const Eigen::VectorXd& R_qp, const Eigen::VectorXd& D_qp);
-
-    /**
+   double computePIS(const Eigen::VectorXd& R_pq, const Eigen::VectorXd& D_pq, const Eigen::VectorXd& R_qp, const Eigen::VectorXd& D_qp);    /**
      * Extracts the line segments forming the iso-curve for a given value.
      * @param field The scalar field (e.g., harmonic function) defined on vertices.
      * @param isoValue The value for which to extract the iso-curve.
@@ -138,6 +175,76 @@ public:
      *         3D coordinates of an iso-curve segment.
      */
     std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> extractIsoCurveSegments(const Eigen::VectorXd& field, double isoValue);
+
+    // ========== Enhanced LibIGL Methods ==========
+
+    /**
+     * Compute pairwise harmonic field using LibIGL's robust harmonic solver
+     * This is more stable and efficient than manual sparse solving
+     * @param p_idx Index of first boundary vertex
+     * @param q_idx Index of second boundary vertex
+     * @return Harmonic field values at all vertices
+     */
+    Eigen::VectorXd computePairwiseHarmonicLibIGL(int p_idx, int q_idx);
+
+    /**
+     * Initialize LibIGL matrices and mesh data
+     * Should be called once after mesh loading
+     */
+    bool initializeLibIGL();
+
+    /**
+     * Compute harmonic coordinates using LibIGL
+     * Supports multiple boundary constraints
+     * @param boundary_vertices Vector of boundary vertex indices
+     * @param boundary_values Vector of values at boundary vertices
+     * @return Harmonic field satisfying boundary conditions
+     */
+    Eigen::VectorXd computeHarmonicCoordinatesLibIGL(
+        const std::vector<int>& boundary_vertices,
+        const std::vector<double>& boundary_values
+    );
+
+    /**
+     * Enhanced R descriptor computation using LibIGL heat geodesics
+     * More accurate and faster than the original implementation
+     * @param field The computed harmonic field
+     * @param numSamplesK The number of iso-curves to sample
+     * @return R descriptor vector
+     */
+    Eigen::VectorXd computeRDescriptorLibIGL(const Eigen::VectorXd& field, int numSamplesK);
+
+    /**
+     * Enhanced D descriptor computation using LibIGL heat geodesics
+     * Much faster and more accurate than Dijkstra-based computation
+     * @param vertex_p_idx Index of source vertex p
+     * @param vertex_q_idx Index of target vertex q
+     * @param field The computed harmonic field
+     * @param numSamplesK Number of iso-curves to sample
+     * @return D descriptor vector
+     */
+    Eigen::VectorXd computeDDescriptorLibIGL(
+        int vertex_p_idx, int vertex_q_idx,
+        const Eigen::VectorXd& field, int numSamplesK
+    );
+
+    /**
+     * Get mesh data in LibIGL format
+     */
+    const Eigen::MatrixXd& getVertexMatrix() const { return V; }
+    const Eigen::MatrixXi& getFaceMatrix() const { return F; }
+
+    /**
+     * Check if LibIGL data is properly initialized
+     */
+    bool isLibIGLInitialized() const { return meshDataComputed; }
+
+    /**
+     * Use LibIGL heat geodesics for enhanced distance computation
+     * @param source_vertex Source vertex index
+     * @return Heat geodesic distances to all vertices
+     */
+    Eigen::VectorXd computeHeatGeodesicDistances(int source_vertex);
 
 };
 

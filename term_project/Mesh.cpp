@@ -909,8 +909,406 @@ float Mesh::getBoundingBoxDiagonal() const {
     // Calculate diagonal length
     float dx = maxX - minX;
     float dy = maxY - minY;
-    float dz = maxZ - minZ;
+    float dz = maxZ - minZ;    return std::sqrt(dx * dx + dy * dy + dz * dz);
+}
 
-    return std::sqrt(dx * dx + dy * dy + dz * dz);
+// ========== LibIGL Integration Implementations ==========
+
+void Mesh::convertToLibIGL() {
+    if (verts.empty() || tris.empty()) {
+        std::cout << "Warning: Cannot convert empty mesh to LibIGL format" << std::endl;
+        return;
+    }
+
+    // Convert vertices to Eigen matrix
+    V.resize(verts.size(), 3);
+    for (int i = 0; i < verts.size(); i++) {
+        V(i, 0) = verts[i]->coords[0];
+        V(i, 1) = verts[i]->coords[1];
+        V(i, 2) = verts[i]->coords[2];
+    }
+
+    // Convert faces to Eigen matrix
+    F.resize(tris.size(), 3);
+    for (int i = 0; i < tris.size(); i++) {
+        F(i, 0) = tris[i]->v1i;
+        F(i, 1) = tris[i]->v2i;
+        F(i, 2) = tris[i]->v3i;
+    }
+
+    // Initialize flags
+    heat_geodesics_precomputed = false;
+
+    // Compute additional LibIGL structures
+    try {
+        // Compute average edge length for heat geodesics
+        avg_edge_length = igl::avg_edge_length(V, F);
+
+        // Compute face areas
+        computeFaceAreasLibIGL();
+
+        // Compute normals
+        computeNormalsLibIGL();
+
+        // Compute barycenters
+        computeBarycenterLibIGL();
+
+        std::cout << "Enhanced LibIGL conversion completed:" << std::endl;
+        std::cout << "  Vertices: " << V.rows() << ", Faces: " << F.rows() << std::endl;
+        std::cout << "  Average edge length: " << avg_edge_length << std::endl;
+
+    } catch (const std::exception& e) {
+        std::cout << "Warning: Some enhanced LibIGL computations failed: " << e.what() << std::endl;
+        std::cout << "Basic LibIGL conversion completed: " << V.rows() << " vertices, " << F.rows() << " faces" << std::endl;
+    }
+}
+
+bool Mesh::computeCotangentLaplacianLibIGL() {
+    if (V.rows() == 0 || F.rows() == 0) {
+        std::cout << "Error: Mesh not converted to LibIGL format. Call convertToLibIGL() first." << std::endl;
+        return false;
+    }
+
+    try {
+        igl::cotmatrix(V, F, L);
+        std::cout << "Successfully computed cotangent Laplacian matrix using LibIGL ("
+                  << L.rows() << "x" << L.cols() << ")" << std::endl;
+        return true;
+    } catch (const std::exception& e) {
+        std::cout << "Error computing cotangent Laplacian: " << e.what() << std::endl;
+        return false;
+    }
+}
+
+bool Mesh::computeMassMatrixLibIGL() {
+    if (V.rows() == 0 || F.rows() == 0) {
+        std::cout << "Error: Mesh not converted to LibIGL format. Call convertToLibIGL() first." << std::endl;
+        return false;
+    }
+
+    try {
+        igl::massmatrix(V, F, igl::MASSMATRIX_TYPE_BARYCENTRIC, M);
+        std::cout << "Successfully computed mass matrix using LibIGL ("
+                  << M.rows() << "x" << M.cols() << ")" << std::endl;
+        return true;
+    } catch (const std::exception& e) {
+        std::cout << "Error computing mass matrix: " << e.what() << std::endl;
+        return false;
+    }
+}
+
+void Mesh::computeAdjacencyLibIGL() {
+    if (V.rows() == 0 || F.rows() == 0) {
+        std::cout << "Error: Mesh not converted to LibIGL format. Call convertToLibIGL() first." << std::endl;
+        return;
+    }
+
+    try {
+        // Compute vertex-vertex adjacency
+        igl::adjacency_list(F, VV);
+
+        // Compute vertex-face adjacency
+        igl::vertex_triangle_adjacency(V, F, VF, VFi);
+
+        std::cout << "Successfully computed adjacency information using LibIGL" << std::endl;
+    } catch (const std::exception& e) {
+        std::cout << "Error computing adjacency: " << e.what() << std::endl;
+    }
+}
+
+void Mesh::computeCurvatureLibIGL() {
+    if (V.rows() == 0 || F.rows() == 0) {
+        std::cout << "Error: Mesh not converted to LibIGL format. Call convertToLibIGL() first." << std::endl;
+        return;
+    }
+
+    try {
+        // Compute Gaussian curvature
+        igl::gaussian_curvature(V, F, gaussian_curvature);
+
+        // Compute principal curvatures and directions
+        igl::principal_curvature(V, F, principal_directions1, principal_directions2,
+                                principal_curvatures1, principal_curvatures2);
+
+        // Compute mean curvature from principal curvatures
+        mean_curvature = 0.5 * (principal_curvatures1 + principal_curvatures2);
+
+        std::cout << "Successfully computed curvature information using LibIGL" << std::endl;
+    } catch (const std::exception& e) {
+        std::cout << "Error computing curvature: " << e.what() << std::endl;
+    }
+}
+
+Eigen::VectorXd Mesh::solveLaplaceEquationLibIGL(
+    const std::vector<int>& boundary_vertices,
+    const std::vector<double>& boundary_values) {
+
+    if (L.rows() == 0) {
+        std::cout << "Error: Laplacian matrix not computed. Call computeCotangentLaplacianLibIGL() first." << std::endl;
+        return Eigen::VectorXd();
+    }
+
+    if (boundary_vertices.size() != boundary_values.size()) {
+        std::cout << "Error: Boundary vertices and values size mismatch" << std::endl;
+        return Eigen::VectorXd();
+    }
+
+    try {
+        // Create constraint matrix
+        Eigen::MatrixXd C(boundary_vertices.size(), 1);
+        Eigen::MatrixXi CI(boundary_vertices.size(), 1);
+
+        for (int i = 0; i < boundary_vertices.size(); i++) {
+            CI(i, 0) = boundary_vertices[i];
+            C(i, 0) = boundary_values[i];
+        }
+
+        // Solve using LibIGL's min_quad_with_fixed
+        Eigen::VectorXd solution;
+        Eigen::SparseMatrix<double> Q = L;
+        Eigen::VectorXd B = Eigen::VectorXd::Zero(V.rows());
+
+        // Use simple direct solve for now (can be enhanced with LibIGL's advanced solvers)
+        Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
+        solver.compute(-L); // Negative Laplacian for stability
+
+        if (solver.info() != Eigen::Success) {
+            std::cout << "Error: Laplacian matrix decomposition failed" << std::endl;
+            return Eigen::VectorXd();
+        }
+
+        // Apply boundary conditions by modifying the system
+        Eigen::SparseMatrix<double> A = -L;
+        Eigen::VectorXd b = Eigen::VectorXd::Zero(V.rows());
+
+        // Set boundary conditions
+        for (int i = 0; i < boundary_vertices.size(); i++) {
+            int idx = boundary_vertices[i];
+            // Set row to identity
+            for (Eigen::SparseMatrix<double>::InnerIterator it(A, idx); it; ++it) {
+                it.valueRef() = (it.row() == it.col()) ? 1.0 : 0.0;
+            }
+            b(idx) = boundary_values[i];
+        }
+
+        solution = solver.solve(b);
+
+        if (solver.info() != Eigen::Success) {
+            std::cout << "Error: Laplace equation solve failed" << std::endl;
+            return Eigen::VectorXd();
+        }
+
+        std::cout << "Successfully solved Laplace equation using LibIGL" << std::endl;
+        return solution;
+
+    } catch (const std::exception& e) {
+        std::cout << "Error solving Laplace equation: " << e.what() << std::endl;
+        return Eigen::VectorXd();
+    }
+}
+
+Eigen::SparseMatrix<double> Mesh::computeGradientLibIGL() {
+    if (V.rows() == 0 || F.rows() == 0) {
+        std::cout << "Error: Mesh not converted to LibIGL format. Call convertToLibIGL() first." << std::endl;
+        return Eigen::SparseMatrix<double>();
+    }
+
+    try {
+        Eigen::SparseMatrix<double> G;
+        igl::grad(V, F, G);
+        std::cout << "Successfully computed gradient operator using LibIGL ("
+                  << G.rows() << "x" << G.cols() << ")" << std::endl;
+        return G;
+    } catch (const std::exception& e) {
+        std::cout << "Error computing gradient: " << e.what() << std::endl;
+        return Eigen::SparseMatrix<double>();
+    }
+}
+
+// ========== Enhanced LibIGL Integration Implementations ==========
+
+bool Mesh::precomputeHeatGeodesics() {
+    if (V.rows() == 0 || F.rows() == 0) {
+        std::cout << "Error: Mesh not converted to LibIGL format. Call convertToLibIGL() first." << std::endl;
+        return false;
+    }
+
+    try {
+        // Precompute heat geodesics data
+        igl::heat_geodesics_precompute(V, F, heat_data);
+        heat_geodesics_precomputed = true;
+
+        std::cout << "Successfully precomputed heat geodesics data" << std::endl;
+        return true;
+    } catch (const std::exception& e) {
+        std::cout << "Error precomputing heat geodesics: " << e.what() << std::endl;
+        return false;
+    }
+}
+
+Eigen::VectorXd Mesh::computeHeatGeodesicDistances(int source_vertex) {
+    if (!heat_geodesics_precomputed) {
+        std::cout << "Warning: Heat geodesics not precomputed. Computing now..." << std::endl;
+        if (!precomputeHeatGeodesics()) {
+            std::cout << "Error: Failed to precompute heat geodesics" << std::endl;
+            return Eigen::VectorXd();
+        }
+    }
+
+    if (source_vertex < 0 || source_vertex >= V.rows()) {
+        std::cout << "Error: Invalid source vertex index: " << source_vertex << std::endl;
+        return Eigen::VectorXd();
+    }
+
+    try {
+        Eigen::VectorXd distances;
+        igl::heat_geodesics_solve(heat_data, source_vertex, distances);
+
+        std::cout << "Computed heat geodesic distances from vertex " << source_vertex << std::endl;
+        return distances;
+    } catch (const std::exception& e) {
+        std::cout << "Error computing heat geodesic distances: " << e.what() << std::endl;
+        return Eigen::VectorXd();
+    }
+}
+
+Eigen::MatrixXd Mesh::computeMultipleHeatGeodesicDistances(const std::vector<int>& source_vertices) {
+    if (!heat_geodesics_precomputed && !precomputeHeatGeodesics()) {
+        std::cout << "Error: Failed to precompute heat geodesics" << std::endl;
+        return Eigen::MatrixXd();
+    }
+
+    try {
+        Eigen::MatrixXd distance_matrix(V.rows(), source_vertices.size());
+
+        for (int i = 0; i < source_vertices.size(); i++) {
+            Eigen::VectorXd distances = computeHeatGeodesicDistances(source_vertices[i]);
+            if (distances.size() == V.rows()) {
+                distance_matrix.col(i) = distances;
+            } else {
+                std::cout << "Error: Failed to compute distances for vertex " << source_vertices[i] << std::endl;
+                return Eigen::MatrixXd();
+            }
+        }
+
+        std::cout << "Computed heat geodesic distances for " << source_vertices.size() << " source vertices" << std::endl;
+        return distance_matrix;
+    } catch (const std::exception& e) {
+        std::cout << "Error computing multiple heat geodesic distances: " << e.what() << std::endl;
+        return Eigen::MatrixXd();
+    }
+}
+
+void Mesh::computeFaceAreasLibIGL() {
+    if (V.rows() == 0 || F.rows() == 0) {
+        std::cout << "Error: Mesh not converted to LibIGL format. Call convertToLibIGL() first." << std::endl;
+        return;
+    }
+
+    try {
+        igl::doublearea(V, F, face_areas);
+        face_areas *= 0.5; // Convert from double area to area
+
+        std::cout << "Successfully computed face areas using LibIGL" << std::endl;
+    } catch (const std::exception& e) {
+        std::cout << "Error computing face areas: " << e.what() << std::endl;
+    }
+}
+
+void Mesh::computeNormalsLibIGL() {
+    if (V.rows() == 0 || F.rows() == 0) {
+        std::cout << "Error: Mesh not converted to LibIGL format. Call convertToLibIGL() first." << std::endl;
+        return;
+    }
+
+    try {
+        // Compute face normals
+        igl::per_face_normals(V, F, face_normals);
+
+        // Compute vertex normals
+        igl::per_vertex_normals(V, F, vertex_normals);
+
+        std::cout << "Successfully computed face and vertex normals using LibIGL" << std::endl;
+    } catch (const std::exception& e) {
+        std::cout << "Error computing normals: " << e.what() << std::endl;
+    }
+}
+
+void Mesh::computeBarycenterLibIGL() {
+    if (V.rows() == 0 || F.rows() == 0) {
+        std::cout << "Error: Mesh not converted to LibIGL format. Call convertToLibIGL() first." << std::endl;
+        return;
+    }
+
+    try {
+        igl::barycenter(V, F, face_barycenters);
+
+        std::cout << "Successfully computed face barycenters using LibIGL" << std::endl;
+    } catch (const std::exception& e) {
+        std::cout << "Error computing barycenters: " << e.what() << std::endl;
+    }
+}
+
+std::vector<int> Mesh::farthestPointSamplingLibIGL(int num_samples, int seed_vertex) {
+    if (!heat_geodesics_precomputed && !precomputeHeatGeodesics()) {
+        std::cout << "Warning: Heat geodesics not available, falling back to original FPS" << std::endl;
+        return farthestPointSampling(num_samples, seed_vertex == -1 ? 0 : seed_vertex);
+    }
+
+    std::vector<int> samples;
+    if (num_samples <= 0 || V.rows() == 0) {
+        return samples;
+    }
+
+    try {
+        // Initialize with seed vertex
+        int current_vertex = (seed_vertex >= 0 && seed_vertex < V.rows()) ? seed_vertex : 0;
+        samples.push_back(current_vertex);
+
+        // Keep track of minimum distances to sampled points
+        Eigen::VectorXd min_distances = computeHeatGeodesicDistances(current_vertex);
+
+        for (int i = 1; i < num_samples && i < V.rows(); i++) {
+            // Find vertex with maximum distance to all previously sampled points
+            double max_dist = -1.0;
+            int farthest_vertex = -1;
+
+            for (int j = 0; j < V.rows(); j++) {
+                // Skip already sampled vertices
+                bool already_sampled = false;
+                for (int k = 0; k < samples.size(); k++) {
+                    if (samples[k] == j) {
+                        already_sampled = true;
+                        break;
+                    }
+                }
+
+                if (!already_sampled && min_distances(j) > max_dist) {
+                    max_dist = min_distances(j);
+                    farthest_vertex = j;
+                }
+            }
+
+            if (farthest_vertex == -1) {
+                break; // No more vertices to sample
+            }
+
+            samples.push_back(farthest_vertex);
+
+            // Update minimum distances
+            Eigen::VectorXd distances_from_new = computeHeatGeodesicDistances(farthest_vertex);
+            for (int j = 0; j < V.rows(); j++) {
+                min_distances(j) = std::min(min_distances(j), distances_from_new(j));
+            }
+        }
+
+        std::cout << "LibIGL-enhanced FPS completed: " << samples.size() << " samples generated" << std::endl;
+        return samples;
+
+    } catch (const std::exception& e) {
+        std::cout << "Error in LibIGL FPS: " << e.what() << std::endl;
+        std::cout << "Falling back to original implementation..." << std::endl;
+        return farthestPointSampling(num_samples, seed_vertex == -1 ? 0 : seed_vertex);
+    }
 }
 

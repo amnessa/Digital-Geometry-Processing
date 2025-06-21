@@ -55,9 +55,7 @@ public:
         const std::vector<double>& rigidity_scores,
         SoSeparator* root,
         SoWinExaminerViewer* viewer
-    );
-
-    /**
+    );    /**
      * Interactive rigidity threshold testing - allows user to experiment with different thresholds
      * and see how many junction points are detected at each threshold level
      *
@@ -73,7 +71,6 @@ public:
         SoWinExaminerViewer* viewer
     );
 
-private:
     /**
      * Compute rigidity score for a single skeletal node using PCA analysis
      * Uses the corrected formula from the paper: ξ = λ₁ / (λ₁ + λ₂ + λ₃)
@@ -89,6 +86,8 @@ private:
         int windowSize = 7
     );
 
+private:
+
     /**
      * Clear visualization by removing all children from root
      * @param root The scene graph root
@@ -96,8 +95,7 @@ private:
     static void clearVisualization(SoSeparator* root);
 
     /**
-     * Create a colored sphere for visualization
-     * @param position The 3D position
+     * Create a colored sphere for visualization     * @param position The 3D position
      * @param color RGB color (0-1 range)
      * @param radius Sphere radius
      * @return SoSeparator containing the sphere visualization
@@ -106,5 +104,28 @@ private:
         const Eigen::Vector3d& position,
         const Eigen::Vector3f& color,
         float radius
+    );
+
+private:
+    /**
+     * Find critical points of harmonic field for skeletal extraction
+     * @param mesh The mesh structure
+     * @param harmonicField The harmonic field values
+     * @return Vector of critical point positions
+     */
+    static std::vector<Eigen::Vector3d> findHarmonicCriticalPoints(
+        const Mesh* mesh,
+        const Eigen::VectorXd& harmonicField
+    );
+
+    /**
+     * Compute medial axis point from isocurve by projecting toward volume center
+     * @param mesh The mesh structure
+     * @param curve The isocurve points
+     * @return Medial axis approximation point
+     */
+    static Eigen::Vector3d computeMedialAxisPoint(
+        const Mesh* mesh,
+        const std::vector<Eigen::Vector3d>& curve
     );
 };

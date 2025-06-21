@@ -21,9 +21,23 @@
 using namespace std;
 
 void VisualizationUtils::clearVisualization(SoSeparator* root) {
-    // Remove all children except the first one (which might be the mesh)
-    while (root->getNumChildren() > 1) {
-        root->removeChild(root->getNumChildren() - 1);
+    // Preserve the mesh (usually the first child added) and remove other visualizations
+    // This is a safer approach that keeps the mesh visible while clearing analysis visualizations
+
+    int numChildren = root->getNumChildren();
+
+    // If there are more than one child, remove all except the first (mesh)
+    // However, if the mesh was reloaded, we need to be more careful
+    if (numChildren > 1) {
+        // Remove children from the end backwards to preserve indices
+        for (int i = numChildren - 1; i >= 1; i--) {
+            root->removeChild(i);
+        }
+        cout << "Cleared " << (numChildren - 1) << " visualization elements, preserving mesh." << endl;
+    } else if (numChildren == 1) {
+        cout << "Only mesh present, nothing to clear." << endl;
+    } else {
+        cout << "No visualizations to clear." << endl;
     }
 }
 
@@ -39,21 +53,41 @@ void VisualizationUtils::testCotangentLaplacian(
     }
 
     cout << "\n=== TESTING COTANGENT LAPLACIAN ===" << endl;
-    cout << "Computing cotangent-weighted Laplacian matrix..." << endl;
+    cout << "Choose implementation:" << endl;
+    cout << "1. libigl-based (recommended - more robust)" << endl;
+    cout << "2. Custom implementation (original)" << endl;
+    cout << "Enter choice (1 or 2): ";
 
+    int choice;
+    cin >> choice;
+
+    bool success = false;
     auto start = clock();
-    bool success = harmonics->computeCotangentLaplacian();
-    auto end = clock();
 
+    if (choice == 1) {
+        cout << "Computing cotangent Laplacian using libigl..." << endl;
+        success = harmonics->computeCotangentLaplacianLibigl();
+    } else {
+        cout << "Computing cotangent Laplacian using custom implementation..." << endl;
+        success = harmonics->computeCotangentLaplacian();
+    }
+
+    auto end = clock();
     double elapsed = double(end - start) / CLOCKS_PER_SEC;
 
     if (success) {
         cout << "SUCCESS: Cotangent Laplacian computed successfully!" << endl;
+        cout << "  Implementation: " << (choice == 1 ? "libigl" : "custom") << endl;
         cout << "  Computation time: " << elapsed << " seconds" << endl;
         cout << "  Matrix size: " << mesh->verts.size() << "x" << mesh->verts.size() << endl;
         cout << "  Properties:" << endl;
         cout << "    - Intrinsic (uses cotangent weights)" << endl;
-        cout << "    - Includes Voronoi area weighting" << endl;
+        if (choice == 1) {
+            cout << "    - libigl robust implementation" << endl;
+            cout << "    - Includes mass matrix computation" << endl;
+        } else {
+            cout << "    - Includes Voronoi area weighting" << endl;
+        }
         cout << "    - Symmetric and positive semi-definite" << endl;
         cout << "    - Ready for harmonic field computation" << endl;
     } else {
@@ -137,6 +171,14 @@ void VisualizationUtils::testPairwiseHarmonics(
 
     cout << "\n=== TESTING PAIRWISE HARMONICS ===" << endl;
 
+    cout << "Choose implementation:" << endl;
+    cout << "1. libigl-based (recommended - more robust)" << endl;
+    cout << "2. Custom implementation (original)" << endl;
+    cout << "Enter choice (1 or 2): ";
+
+    int implementation_choice;
+    cin >> implementation_choice;
+
     int p_idx, q_idx;
     cout << "Enter first vertex index (p, boundary value 0): ";
     cin >> p_idx;
@@ -152,13 +194,22 @@ void VisualizationUtils::testPairwiseHarmonics(
     cout << "Computing harmonic field between vertices " << p_idx << " and " << q_idx << "..." << endl;
 
     auto start = clock();
-    Eigen::VectorXd harmonicField = harmonics->computePairwiseHarmonic(p_idx, q_idx);
-    auto end = clock();
+    Eigen::VectorXd harmonicField;
 
+    if (implementation_choice == 1) {
+        cout << "Using libigl implementation..." << endl;
+        harmonicField = harmonics->computePairwiseHarmonicLibigl(p_idx, q_idx);
+    } else {
+        cout << "Using custom implementation..." << endl;
+        harmonicField = harmonics->computePairwiseHarmonic(p_idx, q_idx);
+    }
+
+    auto end = clock();
     double elapsed = double(end - start) / CLOCKS_PER_SEC;
 
     if (harmonicField.size() == nVerts) {
         cout << "SUCCESS: Pairwise harmonic computed successfully!" << endl;
+        cout << "  Implementation: " << (implementation_choice == 1 ? "libigl" : "custom") << endl;
         cout << "  Computation time: " << elapsed << " seconds" << endl;
         cout << "  Field range: [" << harmonicField.minCoeff() << ", " << harmonicField.maxCoeff() << "]" << endl;
 

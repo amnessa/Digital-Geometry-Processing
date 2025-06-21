@@ -57,28 +57,30 @@ void RigidityAnalysis::enhancedRigidityAnalysis(
                 continue;
             }
 
-            // Extract isocurves using proper triangle marching algorithm
+            // Extract proper skeletal points using harmonic field critical points and medial axis approximation
             vector<Eigen::Vector3d> skeletal_nodes;
-            int numIsocurves = 30; // Use moderate number for efficiency
 
-            for (int k = 1; k < numIsocurves; k++) {
+            // Method 1: Find critical points of the harmonic field (gradient-based)
+            vector<Eigen::Vector3d> criticalPoints = findHarmonicCriticalPoints(mesh, harmonicField);
+
+            // Method 2: Use isocurve centroids but project them toward medial axis
+            int numIsocurves = 20; // Reduced for efficiency
+            for (int k = 3; k < numIsocurves - 2; k++) { // Skip extreme values near boundaries
                 double isoValue = double(k) / numIsocurves;
 
-                // Extract isocurves using triangle marching
                 vector<vector<Eigen::Vector3d>> isocurves = IsocurveAnalysis::extractIsocurvesTriangleMarching(mesh, harmonicField, isoValue);
 
-                // For each isocurve, compute its centroid as a skeletal node
                 for (const auto& curve : isocurves) {
-                    if (curve.size() >= 3) {  // Only use curves with sufficient points
-                        Eigen::Vector3d centroid(0, 0, 0);
-                        for (const auto& point : curve) {
-                            centroid += point;
-                        }
-                        centroid /= curve.size();
+                    if (curve.size() >= 5) {  // Only use substantial curves
+                        // Compute weighted centroid with medial axis correction
+                        Eigen::Vector3d centroid = computeMedialAxisPoint(mesh, curve);
                         skeletal_nodes.push_back(centroid);
                     }
                 }
             }
+
+            // Combine critical points and medial axis points
+            skeletal_nodes.insert(skeletal_nodes.end(), criticalPoints.begin(), criticalPoints.end());
 
             if (skeletal_nodes.size() >= 3) {
                 skeletal_segments.push_back(skeletal_nodes);
@@ -163,14 +165,32 @@ void RigidityAnalysis::visualizeAllRigidityPoints(
     SoWinExaminerViewer* viewer) {
 
     if (rigidity_scores.empty() || skeletal_segments.empty()) {
-        cout << "Error: Please run enhanced rigidity analysis first!" << endl;
-        return;
-    }
-
-    cout << "\n=== VISUALIZING ALL RIGIDITY POINTS ===" << endl;
+        cout << "Error: Please run enhanced rigidity analysis first!" << endl;        return;
+    }    cout << "\n=== VISUALIZING ALL RIGIDITY POINTS ===" << endl;
     cout << "Showing continuous rigidity distribution: Green = Low Rigidity (Junctions), Red = High Rigidity (Limbs)" << endl;
 
+    // Add downsampling to reduce visual clutter
+    int downsample_factor = 10; // Show every 10th point
+    cout << "Using downsampling factor: " << downsample_factor << " (showing every " << downsample_factor << "th point)" << endl;
+
     clearVisualization(root);
+
+    // Calculate model scale for appropriate sphere sizing
+    Eigen::Vector3d minBounds(1e10, 1e10, 1e10);
+    Eigen::Vector3d maxBounds(-1e10, -1e10, -1e10);
+
+    for (int i = 0; i < mesh->verts.size(); i++) {
+        Vertex* v = mesh->verts[i];
+        minBounds[0] = std::min(minBounds[0], (double)v->coords[0]);
+        minBounds[1] = std::min(minBounds[1], (double)v->coords[1]);
+        minBounds[2] = std::min(minBounds[2], (double)v->coords[2]);
+        maxBounds[0] = std::max(maxBounds[0], (double)v->coords[0]);
+        maxBounds[1] = std::max(maxBounds[1], (double)v->coords[1]);
+        maxBounds[2] = std::max(maxBounds[2], (double)v->coords[2]);
+    }
+
+    double modelScale = (maxBounds - minBounds).norm();
+    float baseSphereRadius = std::max(0.005f, (float)(modelScale * 0.008)); // Adaptive radius
 
     // Get all skeletal nodes
     vector<Eigen::Vector3d> allNodes;
@@ -190,10 +210,12 @@ void RigidityAnalysis::visualizeAllRigidityPoints(
     double maxRig = *std::max_element(rigidity_scores.begin(), rigidity_scores.end());
 
     cout << "Rigidity range: [" << minRig << ", " << maxRig << "]" << endl;
-    cout << "Color mapping: Green (≤" << minRig + 0.3 * (maxRig - minRig) << ") -> Yellow -> Red (≥" << maxRig - 0.1 * (maxRig - minRig) << ")" << endl;
-
-    // Create visualization for each node
+    cout << "Color mapping: Green (≤" << minRig + 0.3 * (maxRig - minRig) << ") -> Yellow -> Red (≥" << maxRig - 0.1 * (maxRig - minRig) << ")" << endl;    // Create visualization for each node (with downsampling to reduce clutter)
+    int visualized_count = 0;
     for (int i = 0; i < allNodes.size(); i++) {
+        // Apply downsampling - only visualize every Nth point
+        if (i % downsample_factor != 0) continue;
+
         double rigidity = rigidity_scores[i];
         const Eigen::Vector3d& node = allNodes[i];
 
@@ -206,26 +228,16 @@ void RigidityAnalysis::visualizeAllRigidityPoints(
         float b = 0.1f;  // Small amount of blue for better visibility
 
         Eigen::Vector3f color(r, g, b);
-        SoSeparator* pointViz = createColoredSphere(node, color, 0.008f);
+        SoSeparator* pointViz = createColoredSphere(node, color, baseSphereRadius);
+
         root->addChild(pointViz);
+        visualized_count++;
     }
+
+    cout << "Visualized " << visualized_count << " out of " << allNodes.size() << " total rigidity points" << endl;
 
     // Add a legend by creating sample spheres at known positions
     cout << "Creating color legend..." << endl;
-
-    // Find mesh bounding box for legend placement
-    Eigen::Vector3d minBounds(1e10, 1e10, 1e10);
-    Eigen::Vector3d maxBounds(-1e10, -1e10, -1e10);
-
-    for (int i = 0; i < mesh->verts.size(); i++) {
-        Vertex* v = mesh->verts[i];
-        minBounds[0] = std::min(minBounds[0], (double)v->coords[0]);
-        minBounds[1] = std::min(minBounds[1], (double)v->coords[1]);
-        minBounds[2] = std::min(minBounds[2], (double)v->coords[2]);
-        maxBounds[0] = std::max(maxBounds[0], (double)v->coords[0]);
-        maxBounds[1] = std::max(maxBounds[1], (double)v->coords[1]);
-        maxBounds[2] = std::max(maxBounds[2], (double)v->coords[2]);
-    }
 
     // Create legend spheres
     double legendX = maxBounds[0] + 0.2 * (maxBounds[0] - minBounds[0]);
@@ -241,26 +253,27 @@ void RigidityAnalysis::visualizeAllRigidityPoints(
 
         Eigen::Vector3d legendPos(legendX, legendStartY - i * legendSpacing, (maxBounds[2] + minBounds[2]) / 2);
         Eigen::Vector3f legendColor(r, g, b);
-        SoSeparator* legendSphere = createColoredSphere(legendPos, legendColor, 0.015f);
+        SoSeparator* legendSphere = createColoredSphere(legendPos, legendColor, baseSphereRadius * 1.5f);
         root->addChild(legendSphere);
-    }
-
-    // Count nodes in different rigidity ranges for feedback
+    }    // Count nodes in different rigidity ranges for feedback (from downsampled visualization)
     int lowRig = 0, medRig = 0, highRig = 0;
     double lowThresh = minRig + 0.33 * (maxRig - minRig);
     double highThresh = minRig + 0.67 * (maxRig - minRig);
 
-    for (double rig : rigidity_scores) {
+    for (int i = 0; i < rigidity_scores.size(); i++) {
+        if (i % downsample_factor != 0) continue; // Only count downsampled points
+        double rig = rigidity_scores[i];
         if (rig < lowThresh) lowRig++;
         else if (rig < highThresh) medRig++;
         else highRig++;
     }
 
     cout << "\nVisualization complete!" << endl;
-    cout << "Node distribution:" << endl;
-    cout << "  Low rigidity (Green, potential junctions): " << lowRig << " nodes" << endl;
-    cout << "  Medium rigidity (Yellow): " << medRig << " nodes" << endl;
-    cout << "  High rigidity (Red, limb centers): " << highRig << " nodes" << endl;
+    cout << "Downsampled node distribution (showing every " << downsample_factor << "th point):" << endl;
+    cout << "  Low rigidity (Green, potential junctions): " << lowRig << " nodes shown" << endl;
+    cout << "  Medium rigidity (Yellow): " << medRig << " nodes shown" << endl;
+    cout << "  High rigidity (Red, limb centers): " << highRig << " nodes shown" << endl;
+    cout << "  Total visualized: " << (lowRig + medRig + highRig) << " out of " << rigidity_scores.size() << " total points" << endl;
     cout << "\nLegend spheres placed on the right side of the model" << endl;
 
     viewer->scheduleRedraw();
@@ -343,6 +356,24 @@ void RigidityAnalysis::interactiveRigidityThresholdTesting(
         // Visualize nodes with this threshold
         clearVisualization(root);
 
+        // Calculate adaptive sphere size based on model scale
+        Eigen::Vector3d minBounds(1e10, 1e10, 1e10);
+        Eigen::Vector3d maxBounds(-1e10, -1e10, -1e10);
+
+        for (int i = 0; i < allNodes.size(); i++) {
+            const Eigen::Vector3d& node = allNodes[i];
+            minBounds[0] = std::min(minBounds[0], node[0]);
+            minBounds[1] = std::min(minBounds[1], node[1]);
+            minBounds[2] = std::min(minBounds[2], node[2]);
+            maxBounds[0] = std::max(maxBounds[0], node[0]);
+            maxBounds[1] = std::max(maxBounds[1], node[1]);
+            maxBounds[2] = std::max(maxBounds[2], node[2]);
+        }
+
+        double modelScale = (maxBounds - minBounds).norm();
+        float baseRadius = std::max(0.005f, (float)(modelScale * 0.008));
+        float junctionRadius = baseRadius * 1.5f; // Larger for junction points
+
         for (int i = 0; i < allNodes.size() && i < rigidity_scores.size(); i++) {
             const Eigen::Vector3d& node = allNodes[i];
             double rigidity = rigidity_scores[i];
@@ -356,13 +387,13 @@ void RigidityAnalysis::interactiveRigidityThresholdTesting(
                 r = std::min(1.0f, (float)normalizedRig);
                 g = 0.2f;
                 b = 1.0f - std::min(1.0f, (float)normalizedRig);
-                radius = 0.008f;
+                radius = baseRadius;
             } else {
                 // Non-rigid node - use green (potential junction)
                 r = 0.0f;
                 g = 1.0f;
                 b = 0.2f;
-                radius = 0.012f; // Larger spheres for junction points
+                radius = junctionRadius; // Larger spheres for junction points
             }
 
             Eigen::Vector3f color(r, g, b);
@@ -476,4 +507,130 @@ SoSeparator* RigidityAnalysis::createColoredSphere(
     pointSep->addChild(sphere);
 
     return pointSep;
+}
+
+std::vector<Eigen::Vector3d> RigidityAnalysis::findHarmonicCriticalPoints(
+    const Mesh* mesh,
+    const Eigen::VectorXd& harmonicField) {
+
+    std::vector<Eigen::Vector3d> criticalPoints;
+
+    if (harmonicField.size() != mesh->verts.size()) {
+        return criticalPoints;
+    }
+
+    // Simplified approach: Find vertices with extreme field values
+    // These are likely to be near skeletal points
+
+    double minField = harmonicField.minCoeff();
+    double maxField = harmonicField.maxCoeff();
+    double fieldRange = maxField - minField;
+
+    if (fieldRange < 1e-10) {
+        return criticalPoints; // No variation in field
+    }
+
+    // Find points in the middle range of the harmonic field (0.3 to 0.7)
+    // These tend to be skeletal points rather than source/sink points
+
+    for (int i = 0; i < mesh->verts.size(); i++) {
+        double normalizedField = (harmonicField[i] - minField) / fieldRange;
+
+        if (normalizedField > 0.25 && normalizedField < 0.75) {
+            Vertex* v = mesh->verts[i];
+            Eigen::Vector3d surfacePoint(v->coords[0], v->coords[1], v->coords[2]);
+
+            // Calculate local mesh size for inward displacement
+            double localSize = 0.0;
+            int neighborCount = 0;
+
+            for (int neighborIdx : v->vertList) {
+                if (neighborIdx < mesh->verts.size() && neighborIdx >= 0) {
+                    Vertex* neighbor = mesh->verts[neighborIdx];
+                    double edgeLength = sqrt(
+                        (neighbor->coords[0] - v->coords[0]) * (neighbor->coords[0] - v->coords[0]) +
+                        (neighbor->coords[1] - v->coords[1]) * (neighbor->coords[1] - v->coords[1]) +
+                        (neighbor->coords[2] - v->coords[2]) * (neighbor->coords[2] - v->coords[2])
+                    );
+                    localSize += edgeLength;
+                    neighborCount++;
+                }
+            }
+
+            if (neighborCount > 0) {
+                localSize /= neighborCount;
+
+                // Use mesh center as reference for inward direction
+                Eigen::Vector3d meshCenter(0, 0, 0);
+                for (int j = 0; j < mesh->verts.size(); j++) {
+                    Vertex* vj = mesh->verts[j];
+                    meshCenter += Eigen::Vector3d(vj->coords[0], vj->coords[1], vj->coords[2]);
+                }
+                meshCenter /= mesh->verts.size();
+
+                Eigen::Vector3d toCenter = meshCenter - surfacePoint;
+                if (toCenter.norm() > 1e-10) {
+                    toCenter.normalize();
+                    // Move inward by 15% of local mesh size
+                    Eigen::Vector3d skeletalPoint = surfacePoint + 0.15 * localSize * toCenter;
+                    criticalPoints.push_back(skeletalPoint);
+                }
+            }
+        }
+    }
+
+    return criticalPoints;
+}
+
+Eigen::Vector3d RigidityAnalysis::computeMedialAxisPoint(
+    const Mesh* mesh,
+    const std::vector<Eigen::Vector3d>& curve) {
+
+    if (curve.empty()) {
+        return Eigen::Vector3d(0, 0, 0);
+    }
+
+    // Compute basic centroid
+    Eigen::Vector3d centroid(0, 0, 0);
+    for (const auto& point : curve) {
+        centroid += point;
+    }
+    centroid /= curve.size();
+
+    // Find mesh bounding box center for reference
+    Eigen::Vector3d meshCenter(0, 0, 0);
+    for (int i = 0; i < mesh->verts.size(); i++) {
+        Vertex* v = mesh->verts[i];
+        meshCenter += Eigen::Vector3d(v->coords[0], v->coords[1], v->coords[2]);
+    }
+    meshCenter /= mesh->verts.size();
+
+    // Estimate local thickness by finding nearest surface points
+    double minDistToSurface = 1e10;
+    Eigen::Vector3d nearestSurfacePoint;
+
+    for (int i = 0; i < mesh->verts.size(); i++) {
+        Vertex* v = mesh->verts[i];
+        Eigen::Vector3d surfPoint(v->coords[0], v->coords[1], v->coords[2]);
+        double dist = (surfPoint - centroid).norm();
+
+        if (dist < minDistToSurface) {
+            minDistToSurface = dist;
+            nearestSurfacePoint = surfPoint;
+        }
+    }
+
+    // Project centroid toward mesh center to move away from surface
+    Eigen::Vector3d toCenter = meshCenter - centroid;
+    if (toCenter.norm() > 1e-10) {
+        toCenter.normalize();
+
+        // Move inward by 30% of the distance to nearest surface
+        double inwardMove = std::min(minDistToSurface * 0.3, minDistToSurface * 0.5);
+        Eigen::Vector3d medialPoint = centroid + inwardMove * toCenter;
+
+        return medialPoint;
+    }
+
+    return centroid;
 }

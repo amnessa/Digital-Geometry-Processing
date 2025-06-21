@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "IsocurveAnalysis.h"
+#include "RigidityAnalysis.h"  // For rigidity computation
 #include "helpers.h"  // For PairwiseHarmonics class
 #include <iostream>
 #include <queue>
@@ -11,6 +12,8 @@
 #include <Inventor/nodes/SoCoordinate3.h>
 #include <Inventor/nodes/SoPointSet.h>
 #include <Inventor/nodes/SoIndexedLineSet.h>
+#include <Inventor/nodes/SoSphere.h>
+#include <Inventor/nodes/SoTransform.h>
 #include <Inventor/Win/viewers/SoWinExaminerViewer.h>
 
 // Project headers
@@ -27,40 +30,36 @@ std::vector<std::vector<Eigen::Vector3d>> IsocurveAnalysis::extractIsocurvesTria
 
     if (!mesh) return isocurves;
 
-    // Step 1: Find all edge intersections where isocurve crosses
-    struct EdgeIntersection {
-        int v1, v2;  // Vertex indices of the edge
-        Eigen::Vector3d point;  // 3D intersection point
-        int triangle1, triangle2;  // Adjacent triangles (-1 if boundary)
+    cout << "  Extracting isocurves at value " << isovalue << " using robust triangle marching..." << endl;
+
+    // Step 1: Generate all triangle-marched segments
+    struct TriangleSegment {
+        Eigen::Vector3d p1, p2;  // Endpoints of the segment
+        int triangleId;          // Triangle this segment belongs to
+        int edgeIds[2];          // Mesh edge IDs that this segment connects
     };
 
-    vector<EdgeIntersection> intersections;
+    vector<TriangleSegment> segments;
 
-    // Check all edges for intersections
+    // Process each triangle to find isocurve segments
     for (int t = 0; t < mesh->tris.size(); t++) {
         Triangle* tri = mesh->tris[t];
-
-        // Get the three vertex indices of this triangle
         int vertices[3] = {tri->v1i, tri->v2i, tri->v3i};
+        double fields[3] = {harmonicField(tri->v1i), harmonicField(tri->v2i), harmonicField(tri->v3i)};
 
-        // Check all three edges of this triangle
+        // Find intersections on triangle edges
+        vector<pair<Eigen::Vector3d, int>> intersections; // point and edge index
+
         for (int e = 0; e < 3; e++) {
             int v1 = vertices[e];
             int v2 = vertices[(e + 1) % 3];
-
-            double f1 = harmonicField(v1);
-            double f2 = harmonicField(v2);
+            double f1 = fields[e];
+            double f2 = fields[(e + 1) % 3];
 
             // Check if isocurve crosses this edge
-            bool crosses = (f1 <= isovalue && f2 >= isovalue) || (f1 >= isovalue && f2 <= isovalue);
-            if (crosses && abs(f1 - f2) > 1e-10) {  // Avoid division by zero
-
-                // Skip if intersection point is exactly at a vertex (degenerate case)
-                if (abs(f1 - isovalue) < 1e-10 || abs(f2 - isovalue) < 1e-10) {
-                    continue;
-                }
-
-                // Calculate intersection point using linear interpolation
+            bool crosses = (f1 < isovalue && f2 > isovalue) || (f1 > isovalue && f2 < isovalue);
+            if (crosses && abs(f1 - f2) > 1e-10) {
+                // Linear interpolation to find intersection point
                 double t = (isovalue - f1) / (f2 - f1);
 
                 Vertex* vert1 = mesh->verts[v1];
@@ -71,105 +70,136 @@ std::vector<std::vector<Eigen::Vector3d>> IsocurveAnalysis::extractIsocurvesTria
 
                 Eigen::Vector3d intersection = (1.0 - t) * p1 + t * p2;
 
-                // Check if we already have this edge intersection (avoid duplicates)
-                bool found = false;
-                for (const auto& existing : intersections) {
-                    if ((existing.v1 == v1 && existing.v2 == v2) ||
-                        (existing.v1 == v2 && existing.v2 == v1)) {
-                        found = true;
-                        break;
-                    }
-                }
+                // Create unique edge ID (smaller vertex index first)
+                int edgeId = (v1 < v2) ? (v1 * mesh->verts.size() + v2) : (v2 * mesh->verts.size() + v1);
 
-                if (!found) {
-                    EdgeIntersection newIntersection;
-                    newIntersection.v1 = v1;
-                    newIntersection.v2 = v2;
-                    newIntersection.point = intersection;
-                    newIntersection.triangle1 = t;
-                    newIntersection.triangle2 = -1;  // Will be filled later
-
-                    intersections.push_back(newIntersection);
-                }
+                intersections.push_back(make_pair(intersection, edgeId));
             }
+        }
+
+        // If triangle has exactly 2 intersections, create a segment
+        if (intersections.size() == 2) {
+            TriangleSegment seg;
+            seg.p1 = intersections[0].first;
+            seg.p2 = intersections[1].first;
+            seg.triangleId = t;
+            seg.edgeIds[0] = intersections[0].second;
+            seg.edgeIds[1] = intersections[1].second;
+            segments.push_back(seg);
         }
     }
 
-    // Step 2: Find adjacent triangles for each edge intersection
-    for (auto& intersection : intersections) {
-        int count = 0;
-        for (int t = 0; t < mesh->tris.size(); t++) {
-            Triangle* tri = mesh->tris[t];
-            int vertices[3] = {tri->v1i, tri->v2i, tri->v3i};
+    cout << "    Generated " << segments.size() << " triangle segments" << endl;
 
-            // Check if this triangle contains the edge
-            bool hasEdge = false;
-            for (int e = 0; e < 3; e++) {
-                int tv1 = vertices[e];
-                int tv2 = vertices[(e + 1) % 3];
+    if (segments.empty()) {
+        return isocurves;
+    }
 
-                if ((tv1 == intersection.v1 && tv2 == intersection.v2) ||
-                    (tv1 == intersection.v2 && tv2 == intersection.v1)) {
-                    hasEdge = true;
+    // Step 2: Unify endpoints and build connectivity graph
+    // Use spatial hashing to efficiently find nearby points
+    const double eps = 1e-8; // Tolerance for point equality
+
+    struct GraphNode {
+        Eigen::Vector3d point;
+        vector<int> neighbors; // Indices of connected nodes
+        bool visited;
+
+        GraphNode(const Eigen::Vector3d& p) : point(p), visited(false) {}
+    };
+
+    vector<GraphNode> nodes;
+
+    // Build node list with unified endpoints
+    for (int i = 0; i < segments.size(); i++) {
+        const TriangleSegment& seg = segments[i];
+
+        // Find or create node for p1
+        int node1 = -1;
+        for (int j = 0; j < nodes.size(); j++) {
+            if ((nodes[j].point - seg.p1).norm() < eps) {
+                node1 = j;
+                break;
+            }
+        }
+        if (node1 == -1) {
+            nodes.push_back(GraphNode(seg.p1));
+            node1 = nodes.size() - 1;
+        }
+
+        // Find or create node for p2
+        int node2 = -1;
+        for (int j = 0; j < nodes.size(); j++) {
+            if ((nodes[j].point - seg.p2).norm() < eps) {
+                node2 = j;
+                break;
+            }
+        }
+        if (node2 == -1) {
+            nodes.push_back(GraphNode(seg.p2));
+            node2 = nodes.size() - 1;
+        }
+
+        // Add bidirectional connectivity
+        nodes[node1].neighbors.push_back(node2);
+        nodes[node2].neighbors.push_back(node1);
+    }
+
+    cout << "    Unified to " << nodes.size() << " unique endpoints" << endl;
+
+    // Step 3: Traverse the graph to extract continuous polylines
+    for (int startNode = 0; startNode < nodes.size(); startNode++) {
+        if (nodes[startNode].visited) continue;
+
+        // Start a new polyline from this node
+        vector<Eigen::Vector3d> polyline;
+
+        // Find an unvisited endpoint (degree 1) or any unvisited node
+        int current = startNode;
+        bool foundEndpoint = false;
+
+        // Try to start from an endpoint (degree 1 node)
+        for (int i = 0; i < nodes.size(); i++) {
+            if (!nodes[i].visited && nodes[i].neighbors.size() == 1) {
+                current = i;
+                foundEndpoint = true;
+                break;
+            }
+        }
+
+        if (!foundEndpoint && nodes[current].visited) {
+            continue; // All nodes in this component are visited
+        }
+
+        // Traverse the polyline
+        int previous = -1;
+        while (current != -1 && !nodes[current].visited) {
+            nodes[current].visited = true;
+            polyline.push_back(nodes[current].point);
+
+            // Find next unvisited neighbor
+            int next = -1;
+            for (int neighbor : nodes[current].neighbors) {
+                if (neighbor != previous && !nodes[neighbor].visited) {
+                    next = neighbor;
                     break;
                 }
             }
 
-            if (hasEdge) {
-                if (count == 0) {
-                    intersection.triangle1 = t;
-                } else if (count == 1) {
-                    intersection.triangle2 = t;
-                } else {
-                    break;  // More than 2 triangles share edge (degenerate mesh)
-                }
-                count++;
-            }
+            previous = current;
+            current = next;
+        }
+
+        // Only keep polylines with multiple points
+        if (polyline.size() >= 2) {
+            isocurves.push_back(polyline);
         }
     }
 
-    // Step 3: Group intersections into continuous curves by triangle connectivity
-    vector<bool> used(intersections.size(), false);
+    cout << "    Extracted " << isocurves.size() << " continuous isocurves" << endl;
 
-    for (int i = 0; i < intersections.size(); i++) {
-        if (used[i]) continue;
-
-        // Start a new curve
-        vector<Eigen::Vector3d> curve;
-        queue<int> toProcess;
-        toProcess.push(i);
-        used[i] = true;
-
-        while (!toProcess.empty()) {
-            int currentIdx = toProcess.front();
-            toProcess.pop();
-
-            const EdgeIntersection& current = intersections[currentIdx];
-            curve.push_back(current.point);
-
-            // Find connected intersections (same triangle)
-            for (int j = 0; j < intersections.size(); j++) {
-                if (used[j] || j == currentIdx) continue;
-
-                const EdgeIntersection& candidate = intersections[j];
-
-                // Check if they share a triangle
-                bool connected = (current.triangle1 == candidate.triangle1 && current.triangle1 != -1) ||
-                               (current.triangle1 == candidate.triangle2 && current.triangle1 != -1) ||
-                               (current.triangle2 == candidate.triangle1 && current.triangle2 != -1) ||
-                               (current.triangle2 == candidate.triangle2 && current.triangle2 != -1);
-
-                if (connected) {
-                    toProcess.push(j);
-                    used[j] = true;
-                }
-            }
-        }
-
-        // Only keep curves with multiple points
-        if (curve.size() >= 2) {
-            isocurves.push_back(curve);
-        }
+    // Print some statistics
+    for (int i = 0; i < isocurves.size(); i++) {
+        cout << "      Isocurve " << i << ": " << isocurves[i].size() << " points" << endl;
     }
 
     return isocurves;
@@ -189,87 +219,96 @@ void IsocurveAnalysis::improvedIsoCurveExtraction(
     }
 
     cout << "\n=== IMPROVED ISO-CURVE EXTRACTION ===" << endl;
-    cout << "Extracting dense iso-curves as 'bracelets' around the shape" << endl;
+    cout << "Extracting robust isocurves using triangle marching and graph stitching" << endl;
 
     // Use first two FPS samples for demonstration
     int p_idx = fps_samples[0];
     int q_idx = fps_samples[1];
 
-    cout << "Computing harmonic field between FPS vertices " << p_idx << " and " << q_idx << "..." << endl;
-
-    Eigen::VectorXd harmonicField = harmonics->computePairwiseHarmonic(p_idx, q_idx);
+    cout << "Computing harmonic field between FPS vertices " << p_idx << " and " << q_idx << "..." << endl;    Eigen::VectorXd harmonicField = harmonics->computePairwiseHarmonic(p_idx, q_idx);
     if (harmonicField.size() != mesh->verts.size()) {
         cout << "[ERROR] Failed to compute harmonic field!" << endl;
         return;
     }
 
-    // Clear any existing visualization (assume clearVisualization is available globally)
-    root->removeAllChildren();
+    // Remove previous isocurve and skeletal visualizations (but keep the mesh)
+    // We'll look for nodes with specific names or materials to remove selectively
+    // For now, we'll add our new visualization without clearing everything
 
-    // Extract many more isocurves (like bracelets around a limb)
-    int numIsocurves = 50; // Much denser extraction as in the paper (increased from 25)
+    // Extract robust isocurves using triangle marching
+    int numIsocurves = 25; // Number of isocurve levels to extract
     vector<Eigen::Vector3d> skeletal_nodes;
+    vector<vector<Eigen::Vector3d>> all_isocurves;
 
-    cout << "Extracting " << numIsocurves << " isocurves as parallel 'bracelets'..." << endl;
+    cout << "Extracting " << numIsocurves << " isocurves using robust triangle marching..." << endl;
 
     for (int k = 1; k < numIsocurves; k++) {
         double isoValue = double(k) / numIsocurves;
 
-        // Find all vertices that are approximately at this harmonic field level
-        vector<int> braceletVertices;
-        double tolerance = 0.008; // Much tighter tolerance for better precision (reduced from 0.02)
+        // Extract isocurves at this level using robust triangle marching
+        vector<vector<Eigen::Vector3d>> levelIsocurves = extractIsocurvesTriangleMarching(
+            mesh, harmonicField, isoValue);
 
-        for (int v = 0; v < mesh->verts.size(); v++) {
-            if (abs(harmonicField(v) - isoValue) < tolerance) {
-                braceletVertices.push_back(v);
+        // Process each isocurve at this level
+        for (const auto& isocurve : levelIsocurves) {
+            if (isocurve.size() >= 3) {
+                all_isocurves.push_back(isocurve);
+
+                // Compute centroid of this isocurve for skeletal node
+                Eigen::Vector3d isocurveCenter(0, 0, 0);
+                for (const auto& point : isocurve) {
+                    isocurveCenter += point;
+                }
+                isocurveCenter /= isocurve.size();
+                skeletal_nodes.push_back(isocurveCenter);
+
+                // Visualize this isocurve
+                SoSeparator* isocurveSep = new SoSeparator();
+                SoMaterial* mat = new SoMaterial();
+
+                // Color based on position along harmonic field (blue to red gradient)
+                float r = isoValue;
+                float g = 0.2f;
+                float b = 1.0f - isoValue;
+                mat->diffuseColor.setValue(r, g, b);
+                isocurveSep->addChild(mat);
+
+                // Draw the isocurve as a polyline
+                SoCoordinate3* coords = new SoCoordinate3();
+                coords->point.setNum(isocurve.size());
+
+                for (int i = 0; i < isocurve.size(); i++) {
+                    coords->point.set1Value(i, isocurve[i][0], isocurve[i][1], isocurve[i][2]);
+                }
+                isocurveSep->addChild(coords);
+
+                // Create line set to visualize the polyline
+                SoIndexedLineSet* lineSet = new SoIndexedLineSet();
+                for (int i = 0; i < isocurve.size(); i++) {
+                    lineSet->coordIndex.set1Value(i, i);
+                }
+                lineSet->coordIndex.set1Value(isocurve.size(), -1); // End marker
+                isocurveSep->addChild(lineSet);
+
+                root->addChild(isocurveSep);
+
+                cout << "  Isocurve " << k << " (value=" << isoValue << "): "
+                     << isocurve.size() << " points in continuous polyline" << endl;
             }
         }
-
-        if (braceletVertices.size() >= 3) {
-            // Compute centroid of this "bracelet" - this becomes a skeletal node
-            Eigen::Vector3d braceletCenter(0, 0, 0);
-            for (int v : braceletVertices) {
-                braceletCenter += Eigen::Vector3d(mesh->verts[v]->coords[0],
-                                                  mesh->verts[v]->coords[1],
-                                                  mesh->verts[v]->coords[2]);
-            }
-            braceletCenter /= braceletVertices.size();
-            skeletal_nodes.push_back(braceletCenter);
-
-            // Visualize this bracelet
-            SoSeparator* braceletSep = new SoSeparator();
-            SoMaterial* mat = new SoMaterial();
-
-            // Color based on position along harmonic field (blue to red gradient)
-            float r = isoValue;
-            float g = 0.2f;
-            float b = 1.0f - isoValue;
-            mat->diffuseColor.setValue(r, g, b);
-            braceletSep->addChild(mat);
-
-            // Draw points forming the bracelet
-            SoCoordinate3* coords = new SoCoordinate3();
-            coords->point.setNum(braceletVertices.size());
-
-            for (int i = 0; i < braceletVertices.size(); i++) {
-                Vertex* v = mesh->verts[braceletVertices[i]];
-                coords->point.set1Value(i, v->coords[0], v->coords[1], v->coords[2]);
-            }
-            braceletSep->addChild(coords);
-
-            SoPointSet* pointSet = new SoPointSet();
-            pointSet->numPoints = braceletVertices.size();
-            braceletSep->addChild(pointSet);
-
-            root->addChild(braceletSep);
-
-            cout << "  Isocurve " << k << " (value=" << isoValue << "): "
-                 << braceletVertices.size() << " vertices forming bracelet" << endl;
-        }
-    }
-
-    // Visualize the skeletal segment by connecting centroids
+    }    // Visualize the skeletal segment by connecting centroids
     if (skeletal_nodes.size() >= 3) {
+        // Compute rigidity scores for each skeletal node (isocurve centroid)
+        cout << "\nComputing rigidity scores for isocurve centroids..." << endl;
+        vector<double> rigidity_scores;
+
+        for (int i = 0; i < skeletal_nodes.size(); i++) {
+            double rigidity = RigidityAnalysis::computeNodeRigidity(skeletal_nodes, i, 7);
+            rigidity_scores.push_back(rigidity);
+            cout << "  Centroid " << i << ": rigidity = " << rigidity << endl;
+        }
+
+        // Create skeletal line visualization
         SoSeparator* skeletonSep = new SoSeparator();
         SoMaterial* skelMat = new SoMaterial();
         skelMat->diffuseColor.setValue(1.0f, 1.0f, 0.0f); // Yellow for skeleton
@@ -292,17 +331,61 @@ void IsocurveAnalysis::improvedIsoCurveExtraction(
         skeletonSep->addChild(skelLines);
         root->addChild(skeletonSep);
 
+        // Visualize rigidity points with color coding (green=rigid, red=non-rigid)
+        cout << "Visualizing rigidity points on isocurve centroids..." << endl;
+
+        // Normalize rigidity scores for color mapping
+        double minRig = *std::min_element(rigidity_scores.begin(), rigidity_scores.end());
+        double maxRig = *std::max_element(rigidity_scores.begin(), rigidity_scores.end());
+        double rigRange = maxRig - minRig;
+        if (rigRange < 1e-10) rigRange = 1.0; // Avoid division by zero
+
+        for (int i = 0; i < skeletal_nodes.size(); i++) {
+            SoSeparator* pointSep = new SoSeparator();
+
+            // Position the sphere at the skeletal node
+            SoTransform* transform = new SoTransform();
+            transform->translation.setValue(
+                skeletal_nodes[i][0],
+                skeletal_nodes[i][1],
+                skeletal_nodes[i][2]
+            );
+            pointSep->addChild(transform);
+
+            // Color based on rigidity score (green = rigid, red = non-rigid)
+            SoMaterial* mat = new SoMaterial();
+            double normalizedRig = (rigidity_scores[i] - minRig) / rigRange;
+
+            // Green to red gradient: rigid (high score) = green, non-rigid (low score) = red
+            float r = 1.0f - normalizedRig;  // More red for lower rigidity
+            float g = normalizedRig;         // More green for higher rigidity
+            float b = 0.1f;                  // Minimal blue
+
+            mat->diffuseColor.setValue(r, g, b);
+            pointSep->addChild(mat);
+
+            // Create sphere to mark the rigidity point
+            SoSphere* sphere = new SoSphere();
+            sphere->radius = 0.02f; // Adaptive sizing based on mesh bounds
+            pointSep->addChild(sphere);
+
+            root->addChild(pointSep);
+        }
+
         // Store for rigidity analysis
         skeletal_segments.clear();
         skeletal_segments.push_back(skeletal_nodes);
 
         cout << "\nSUCCESS: Generated skeletal segment with " << skeletal_nodes.size() << " nodes" << endl;
-        cout << "Yellow line shows the skeletal segment connecting bracelet centroids" << endl;
+        cout << "Yellow line shows the skeletal segment connecting isocurve centroids" << endl;
+        cout << "Colored spheres show rigidity points (green=rigid, red=non-rigid)" << endl;
+        cout << "Rigidity range: [" << minRig << ", " << maxRig << "]" << endl;
+        cout << "Total " << all_isocurves.size() << " robust isocurves extracted" << endl;
     }
 
     viewer->scheduleRedraw();
     viewer->viewAll();
-    cout << "Improved iso-curve extraction complete - showing dense parallel bracelets!" << endl;
+    cout << "Robust iso-curve extraction complete - showing continuous polylines!" << endl;
 }
 
 Eigen::Vector3d IsocurveAnalysis::interpolateVertex(

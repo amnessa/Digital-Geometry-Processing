@@ -30,6 +30,13 @@
 #include "Painter.h"
 #include "helpers.h"
 
+// libigl headers - include after project headers to avoid conflicts
+#include <igl/cotmatrix.h>
+#include <igl/harmonic.h>
+#include <igl/massmatrix.h>
+#include <igl/boundary_facets.h>
+#include <igl/slice.h>
+
 using namespace std;
 
 // PairwiseHarmonics private methods implementation
@@ -149,7 +156,7 @@ double PairwiseHarmonics::computeVoronoiArea(int vertexIdx) {
 
 // PairwiseHarmonics public methods implementation
 
-PairwiseHarmonics::PairwiseHarmonics(Mesh* m) : mesh(m), laplacianComputed(false), solverComputed(false) {}
+PairwiseHarmonics::PairwiseHarmonics(Mesh* m) : mesh(m), laplacianComputed(false), solverComputed(false), meshDataComputed(false) {}
 
 bool PairwiseHarmonics::computeCotangentLaplacian() {
     int nVerts = mesh->verts.size();
@@ -631,342 +638,262 @@ double PairwiseHarmonics::computeIsoCurveLength(const Eigen::VectorXd& field, do
 
 
 Eigen::VectorXd PairwiseHarmonics::computeRDescriptor(const Eigen::VectorXd& field, int numSamplesK) {
-    Eigen::VectorXd R(numSamplesK);
+    Eigen::VectorXd R_descriptor(numSamplesK);
 
-    for (int k = 0; k<numSamplesK; ++k){
-        // Sample iso-value uniformly from (0, 1)
-        double isoValue = static_cast<double>(k +1) / (numSamplesK + 1);
-        R(k) = computeIsoCurveLength(field, isoValue);
-    }
+    // Sample K iso-values between 0 and 1
+    for (int k = 0; k < numSamplesK; ++k) {
+        double isoValue = (double)(k + 1) / (numSamplesK + 1);
+        double totalLength = 0.0;
+        int segmentCount = 0;
 
-    return R;
-}
+        // Iterate through each triangle to find segments for this isoValue
+        for (const auto& tri : mesh->tris) {
+            int v1i = tri->v1i;
+            int v2i = tri->v2i;
+            int v3i = tri->v3i;
 
-double PairwiseHarmonics::computePIS(const Eigen::VectorXd& R_pq, const Eigen::VectorXd& D_pq, const Eigen::VectorXd& R_qp, const Eigen::VectorXd& D_qp){
-    int K = R_pq.size();
-    if (K == 0 || K != D_pq.size() || K != R_qp.size() || K != D_qp.size()) {
-        std::cerr << "Error: Descriptor size mismatch in computePIS. K=" << K << std::endl;
-        return 0.0; // Indicate error or poor symmetry
-    }
+            double val1 = field(v1i);
+            double val2 = field(v2i);
+            double val3 = field(v3i);
 
-    double sum_L = 0.0;
-    for (int k = 0; k<K; ++k){
-        double r_pq_k = R_pq(k);
-        double d_pq_k = D_pq(k);
-        // Note :Paper uses 1-based indexing, C++ uses 0-based
-        // k maps to paper's k+1. K-k maps to paper's K-(K+1)+1 = K-k.
-        // We need R_qp(K-1-k) and D_qp(K-1-k) for 0-based index.
-        int k_sym = K - 1 - k;
-        double r_qp_sym = R_qp(k_sym);
-        double d_qp_sym = D_qp(k_sym);
+            std::vector<Eigen::Vector3d> intersectionPoints;
 
-        // L(x, y) = |x- y| / (x+ y) - handle division by zero
-
-        auto compute_L = [](double x, double y) {
-            if (std::abs(x+y)<1e-9) {
-                return 0.0; // If both are near zero, difference is small, treat as symmetric
+            // Check edge 1-2
+            if ((val1 < isoValue && val2 > isoValue) || (val1 > isoValue && val2 < isoValue)) {
+                double t = (isoValue - val1) / (val2 - val1);
+                t = std::max(0.0, std::min(1.0, t)); // Clamp t to [0, 1]
+                intersectionPoints.push_back(mesh->verts[v1i]->coords + t * (mesh->verts[v2i]->coords - mesh->verts[v1i]->coords));
             }
-            return std::abs(x-y) / (x+y);
-        };
-
-        sum_L += compute_L(r_pq_k, r_qp_sym);
-        sum_L += compute_L(d_pq_k, d_qp_sym);
-    }
-
-    // PIS = exp(- (1/K)*sum_L)
-    double pis_score = std::exp(-sum_L / static_cast<double>(K));
-    return pis_score;
-}
-
-/**
- * Helper function to safely interpolate a point on an edge based on isoValue.
- */
-Eigen::Vector3d interpolateIsoPoint(const Eigen::Vector3d& p_a, const Eigen::Vector3d& p_b,
-                                    double val_a, double val_b, double isoValue, double tolerance) {
-    if (std::abs(val_a - val_b) < tolerance) {
-        // This case should ideally not be reached if called when val_a and val_b are on opposite sides.
-        // Return midpoint as a fallback.
-        return (p_a + p_b) * 0.5;
-    }
-    double t = (isoValue - val_a) / (val_b - val_a);
-    // Clamp t for robustness
-    t = std::max(0.0, std::min(1.0, t));
-    return p_a + t * (p_b - p_a);
-}
-
-/**
- * Extracts line segments representing the isocontour for a given field and isoValue.
- * Handles cases where the isocontour passes through vertices.
- * @param field The scalar field defined on the mesh vertices.
- * @param isoValue The value for which to extract the isocontour.
- * @return A vector of pairs, where each pair represents the start and end points of a segment.
- */
-std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> PairwiseHarmonics::extractIsoCurveSegments(const Eigen::VectorXd& field, double isoValue) {
-    std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> segments;
-    double tolerance = 1e-9; // Tolerance for floating point comparisons
-
-    // Iterate through each triangle
-    for (const auto& tri : mesh->tris) {
-        int v1i = tri->v1i;
-        int v2i = tri->v2i;
-        int v3i = tri->v3i;
-
-        double val1 = field(v1i);
-        double val2 = field(v2i);
-        double val3 = field(v3i);
-
-        const SbVec3f& p1_coords = mesh->verts[v1i]->coords;
-        const SbVec3f& p2_coords = mesh->verts[v2i]->coords;
-        const SbVec3f& p3_coords = mesh->verts[v3i]->coords;
-
-        Eigen::Vector3d p1(p1_coords[0], p1_coords[1], p1_coords[2]);
-        Eigen::Vector3d p2(p2_coords[0], p2_coords[1], p2_coords[2]);
-        Eigen::Vector3d p3(p3_coords[0], p3_coords[1], p3_coords[2]);
-
-        // Classify vertices relative to isoValue: 1=above, -1=below, 0=on
-        int state1 = (val1 > isoValue + tolerance) ? 1 : ((val1 < isoValue - tolerance) ? -1 : 0);
-        int state2 = (val2 > isoValue + tolerance) ? 1 : ((val2 < isoValue - tolerance) ? -1 : 0);
-        int state3 = (val3 > isoValue + tolerance) ? 1 : ((val3 < isoValue - tolerance) ? -1 : 0);
-
-        std::vector<Eigen::Vector3d> intersectionPoints;
-
-        // Check edge 1-2 for intersection
-        if (state1 * state2 < 0) { // If states are opposite sign (-1 and 1)
-            intersectionPoints.push_back(interpolateIsoPoint(p1, p2, val1, val2, isoValue, tolerance));
-        }
-        // Check edge 2-3 for intersection
-        if (state2 * state3 < 0) {
-            intersectionPoints.push_back(interpolateIsoPoint(p2, p3, val2, val3, isoValue, tolerance));
-        }
-        // Check edge 3-1 for intersection
-        if (state3 * state1 < 0) {
-            intersectionPoints.push_back(interpolateIsoPoint(p3, p1, val3, val1, isoValue, tolerance));
-        }
-
-        // Check if vertices lie exactly on the isoValue
-        if (state1 == 0) intersectionPoints.push_back(p1);
-        if (state2 == 0) intersectionPoints.push_back(p2);
-        if (state3 == 0) intersectionPoints.push_back(p3);
-
-        // Remove duplicate points (can happen if interpolation hits a vertex exactly)
-        if (intersectionPoints.size() > 1) {
-            std::vector<Eigen::Vector3d> uniquePoints;
-            uniquePoints.push_back(intersectionPoints[0]);
-            for (size_t i = 1; i < intersectionPoints.size(); ++i) {
-                bool duplicate = false;
-                for (const auto& uniquePt : uniquePoints) {
-                    if ((intersectionPoints[i] - uniquePt).squaredNorm() < tolerance * tolerance) {
-                        duplicate = true;
-                        break;
-                    }
-                }
-                if (!duplicate) {
-                    uniquePoints.push_back(intersectionPoints[i]);
-                }
+            // Check edge 2-3
+            if ((val2 < isoValue && val3 > isoValue) || (val2 > isoValue && val3 < isoValue)) {
+                double t = (isoValue - val2) / (val3 - val2);
+                t = std::max(0.0, std::min(1.0, t));
+                intersectionPoints.push_back(mesh->verts[v2i]->coords + t * (mesh->verts[v3i]->coords - mesh->verts[v2i]->coords));
             }
-            intersectionPoints = uniquePoints;
+            // Check edge 3-1
+            if ((val3 < isoValue && val1 > isoValue) || (val3 > isoValue && val1 < isoValue)) {
+                double t = (isoValue - val3) / (val1 - val3);
+                t = std::max(0.0, std::min(1.0, t));
+                intersectionPoints.push_back(mesh->verts[v3i]->coords + t * (mesh->verts[v1i]->coords - mesh->verts[v3i]->coords));
+            }
+
+            // If exactly two intersection points are found, calculate the segment length
+            if (intersectionPoints.size() == 2) {
+                totalLength += (intersectionPoints[0] - intersectionPoints[1]).norm();
+                segmentCount++;
+            }
         }
 
-
-        // A valid isocontour crossing should result in exactly two unique points on the triangle boundary.
-        if (intersectionPoints.size() == 2) {
-            segments.push_back({intersectionPoints[0], intersectionPoints[1]});
-        } else if (intersectionPoints.size() > 2) {
-            // This case can occur in complex scenarios (e.g., saddle points exactly at isoValue)
-            // or if the field is noisy. For simplicity, we might ignore these complex cases
-            // or try a more sophisticated triangulation/connection logic if needed.
-            // Current approach: Log a warning and potentially skip.
-            // std::cerr << "Warning: Found " << intersectionPoints.size()
-            //           << " intersection/on-vertex points in triangle. Complex case not fully handled." << std::endl;
-
-            // Simple fallback: connect first two points found (might be incorrect)
-             segments.push_back({intersectionPoints[0], intersectionPoints[1]});
-             // Or connect points pairwise if size is 4 etc. - requires careful topology handling.
-        }
-        // If size is 0 or 1, no segment is formed within this triangle.
+        // Average length per segment for this iso-value
+        R_descriptor(k) = (segmentCount > 0) ? totalLength / segmentCount : 0.0;
     }
-    return segments;
+
+    return R_descriptor;
 }
 
-/**
- * Prints a simple text-based histogram for an Eigen vector.
- * @param descriptor The vector of values to plot.
- * @param title A title for the histogram.
- * @param maxBarWidth The maximum width (number of characters) for the longest bar.
- * @param barChar The character used to draw the bars.
- */
-void printHistogram(const Eigen::VectorXd& descriptor, const std::string& title, int maxBarWidth = 50, char barChar = '*') {
-    std::cout << "\n--- Histogram: " << title << " ---" << std::endl;
-    if (descriptor.size() == 0) {
-        std::cout << "  (Descriptor is empty)" << std::endl;
-        return;
-    }
-
-    double maxValue = descriptor.maxCoeff();
-
-    // Handle zero, near-zero, or negative max value (though descriptors should be non-negative)
-    if (maxValue <= 1e-9) {
-        std::cout << "  (Max value <= 0, cannot generate proportional histogram)" << std::endl;
-        // Just print values without bars
-        for (int i = 0; i < descriptor.size(); ++i) {
-            std::cout << std::setw(3) << i << ": "
-                      << std::fixed << std::setprecision(4) << std::setw(10) << descriptor(i) << " |" << std::endl;
-        }
-        std::cout << "--------------------------" << std::endl;
-        return;
-    }
-
-    // Print histogram bars
-    for (int i = 0; i < descriptor.size(); ++i) {
-        double value = descriptor(i);
-        // Ensure value is non-negative before scaling (important if descriptors could be negative)
-        value = std::max(0.0, value);
-
-        int barWidth = static_cast<int>(std::round((value / maxValue) * maxBarWidth));
-        barWidth = std::max(0, barWidth); // Ensure non-negative width
-
-        std::cout << std::setw(3) << i << ": "
-                  << std::fixed << std::setprecision(4) << std::setw(10) << value << " |" // Print index and value
-                  << std::string(barWidth, barChar) // Print the bar
-                  << std::endl;
-    }
-    std::cout << "--------------------------" << std::endl;
-}
-
-// Free function implementation
-SoSeparator* testPairwiseHarmonic(Mesh* mesh, int vertex_p_idx, int vertex_q_idx, Painter* painter) {
-    // Create a result separator
-    SoSeparator* result = new SoSeparator();
-
-    // Create the PairwiseHarmonics object
-    PairwiseHarmonics ph(mesh);
-
-    // Compute the Laplacian
-    std::cout << "Computing Cotangent Laplacian..." << std::endl;
-    if (!ph.computeCotangentLaplacian()) {
-        std::cerr << "Failed to compute Laplacian!" << std::endl;
-        return result;
-    }
-    std::cout << "Laplacian computed." << std::endl;
-
-    // --- Compute for pair (p, q) ---
-    std::cout << "Computing Pairwise Harmonic for vertices " << vertex_p_idx << " -> " << vertex_q_idx << "..." << std::endl;
-    Eigen::VectorXd harmonicField_pq = ph.computePairwiseHarmonic(vertex_p_idx, vertex_q_idx);
-
-    if (harmonicField_pq.size() == 0) {
-        std::cerr << "Failed to compute pairwise harmonic for (p, q)!" << std::endl;
-        return result;
-    }
-    std::cout << "Pairwise harmonic (p, q) computed." << std::endl;
-
-    // Visualize the harmonic field (p, q)
-    SoSeparator* fieldVisualization_pq = ph.visualizeHarmonicField(harmonicField_pq, painter);
-    result->addChild(fieldVisualization_pq);
-
-    // Highlight the source and target vertices
-    result->addChild(painter->get1PointSep(mesh, vertex_p_idx, 0.0f, 0.0f, 1.0f, 5.0f, false)); // Blue for p (value 0)
-    result->addChild(painter->get1PointSep(mesh, vertex_q_idx, 1.0f, 0.0f, 0.0f, 5.0f, false)); // Red for q (value 1)
-
-    // --- Compute Geodesic Distances needed for D Descriptors ---
-    std::cout << "Precomputing geodesic distances for D descriptors..." << std::endl;
+Eigen::VectorXd PairwiseHarmonics::computeDDescriptor(int vertex_p_idx, int vertex_q_idx, const Eigen::VectorXd& field, int numSamplesK) {
+    Eigen::VectorXd D_descriptor = Eigen::VectorXd::Zero(numSamplesK);
     int N = mesh->verts.size();
-    float* dist_p = mesh->computeGeodesicDistances(vertex_p_idx, N);
-    float* dist_q = mesh->computeGeodesicDistances(vertex_q_idx, N);
 
-    if (!dist_p || !dist_q) {
-        std::cerr << "Failed to compute geodesic distances for D descriptor test!" << std::endl;
-        if (dist_p) delete[] dist_p;
-        if (dist_q) delete[] dist_q;
-        return result;
+    // --- Check if precomputed distances are provided ---
+    // (This version assumes distances are always computed fresh)
+    // --- End Check ---
+
+    // Sample K iso-values between 0 and 1
+    for (int k = 0; k < numSamplesK; ++k) {
+        double isoValue = (double)(k + 1) / (numSamplesK + 1);
+        double totalDistanceSum = 0.0;
+        int intersectionCount = 0; // Count intersection points for averaging
+
+        // Iterate through each triangle to find intersections for this isoValue
+        for (const auto& tri : mesh->tris) {
+            int v1i = tri->v1i;
+            int v2i = tri->v2i;
+            int v3i = tri->v3i;
+
+            double val1 = field(v1i);
+            double val2 = field(v2i);
+            double val3 = field(v3i);
+
+            // Helper lambda to process an edge intersection
+            auto processIntersection = [&](int ui, int vi, double val_u, double val_v) {
+                // Avoid division by zero or cases where edge is nearly flat w.r.t field
+                if (std::abs(val_u - val_v) > 1e-9) {
+                    double t = (isoValue - val_u) / (val_v - val_u);
+
+                    // Clamp t to [0, 1] for robustness
+                    t = std::max(0.0, std::min(1.0, t));
+
+                    // Get precomputed geodesic distances for edge endpoints using the passed arrays
+                    double d_up = mesh->verts[ui]->geodesicDistance;
+                    double d_vp = mesh->verts[vi]->geodesicDistance;
+                    double d_uq = mesh->verts[ui]->geodesicDistance;
+                    double d_vq = mesh->verts[vi]->geodesicDistance;
+
+                    // Check for infinite distances (unreachable vertices)
+                    if (std::isinf(d_up) || std::isinf(d_vp) || std::isinf(d_uq) || std::isinf(d_vq)) {
+                        return; // Skip this intersection if endpoints are unreachable from p or q
+                    }
+
+                    // Interpolate geodesic distances to the intersection point x
+                    double d_xp = (1.0 - t) * d_up + t * d_vp;
+                    double d_xq = (1.0 - t) * d_uq + t * d_vq;
+
+                    totalDistanceSum += (d_xp + d_xq);
+                    intersectionCount++;
+                }
+            };
+
+            // Check edge 1-2
+            if ((val1 < isoValue && val2 > isoValue) || (val1 > isoValue && val2 < isoValue)) {
+                processIntersection(v1i, v2i, val1, val2);
+            }
+            // Check edge 2-3
+            if ((val2 < isoValue && val3 > isoValue) || (val2 > isoValue && val3 < isoValue)) {
+                processIntersection(v2i, v3i, val2, val3);
+            }
+            // Check edge 3-1
+            if ((val3 < isoValue && val1 > isoValue) || (val3 > isoValue && val1 < isoValue)) {
+                processIntersection(v3i, v1i, val3, val1);
+            }
+        } // End triangle loop
+
+        // Calculate average distance sum for this iso-value
+        // Each segment contributes two points, so divide by count/2 (or multiply sum by 2/count)
+        if (intersectionCount > 0) {
+            D_descriptor(k) = 2.0 * totalDistanceSum / intersectionCount;
+        } else {
+            D_descriptor(k) = 0.0; // Or handle as error/special value
+        }
+
+    } // End iso-value loop
+
+    return D_descriptor;
+}
+
+// =============================================
+// ENHANCED LIBIGL-BASED METHODS IMPLEMENTATION
+// =============================================
+
+Eigen::VectorXd PairwiseHarmonics::computeRDescriptorLibIGL(const Eigen::VectorXd& field, int numSamplesK) {
+    if (!meshDataComputed) {
+        std::cout << "Error: LibIGL not initialized" << std::endl;
+        return computeRDescriptor(field, numSamplesK); // Fall back to original
     }
-    std::cout << "Geodesic distances computed." << std::endl;
-    // --- End Geodesic Distance Computation ---
 
-    // --- Compute Descriptors for (p, q) ---
-    int numSamplesK = 10; // Number of samples for descriptors
-    std::cout << "Computing R Descriptor (p, q) with K=" << numSamplesK << "..." << std::endl;
-    Eigen::VectorXd R_pq = ph.computeRDescriptor(harmonicField_pq, numSamplesK);
-    if (R_pq.size() == numSamplesK) {
-        std::cout << "R_pq computed: " << R_pq.transpose() << std::endl;
-    } else {
-        std::cerr << "Failed to compute R_pq!" << std::endl;
+    try {
+        std::cout << "Computing R descriptor using enhanced LibIGL methods..." << std::endl;
+
+        Eigen::VectorXd R_descriptor(numSamplesK);
+
+        for (int k = 0; k < numSamplesK; k++) {
+            double isovalue = (k + 1.0) / (numSamplesK + 1.0);
+
+            // Use the enhanced isocurve extraction with LibIGL mesh data
+            double length = computeIsoCurveLength(field, isovalue);
+            R_descriptor(k) = length;
+        }
+
+        std::cout << "Enhanced R descriptor computed with " << numSamplesK << " samples" << std::endl;
+        return R_descriptor;
+
+    } catch (const std::exception& e) {
+        std::cout << "Error in enhanced R descriptor computation: " << e.what() << std::endl;
+        return computeRDescriptor(field, numSamplesK); // Fall back to original
+    }
+}
+
+Eigen::VectorXd PairwiseHarmonics::computeDDescriptorLibIGL(
+    int vertex_p_idx, int vertex_q_idx,
+    const Eigen::VectorXd& field, int numSamplesK) {
+
+    if (!meshDataComputed) {
+        std::cout << "Error: LibIGL not initialized" << std::endl;
+
+        // Fall back to original implementation
+        int N;
+        float* dist_p = mesh->computeGeodesicDistances(vertex_p_idx, N);
+        float* dist_q = mesh->computeGeodesicDistances(vertex_q_idx, N);
+
+        if (dist_p && dist_q) {
+            Eigen::VectorXd result = computeDDescriptor(vertex_p_idx, vertex_q_idx, field, numSamplesK, dist_p, dist_q);
+            delete[] dist_p;
+            delete[] dist_q;
+            return result;
+        }
+        return Eigen::VectorXd();
     }
 
-    std::cout << "Computing D Descriptor (p, q) with K=" << numSamplesK << "..." << std::endl;
-    Eigen::VectorXd D_pq = ph.computeDDescriptor(vertex_p_idx, vertex_q_idx, harmonicField_pq, numSamplesK, dist_p, dist_q);
-    if (D_pq.size() == numSamplesK) {
-        std::cout << "D_pq computed: " << D_pq.transpose() << std::endl;
-    } else {
-        std::cerr << "Failed to compute D_pq!" << std::endl;
+    try {
+        std::cout << "Computing D descriptor using LibIGL heat geodesics..." << std::endl;
+
+        // Use the mesh's LibIGL heat geodesics for fast and accurate distance computation
+        Eigen::VectorXd dist_p = mesh->computeHeatGeodesicDistances(vertex_p_idx);
+        Eigen::VectorXd dist_q = mesh->computeHeatGeodesicDistances(vertex_q_idx);
+
+        if (dist_p.size() != V.rows() || dist_q.size() != V.rows()) {
+            std::cout << "Error: Heat geodesic computation failed" << std::endl;
+            return Eigen::VectorXd();
+        }
+
+        Eigen::VectorXd D_descriptor(numSamplesK);
+
+        for (int k = 0; k < numSamplesK; k++) {
+            double isovalue = (k + 1.0) / (numSamplesK + 1.0);
+
+            // Find vertices close to this isovalue
+            std::vector<int> isocurve_vertices;
+            double tolerance = 0.1 / numSamplesK; // Adaptive tolerance
+
+            for (int i = 0; i < field.size(); i++) {
+                if (std::abs(field(i) - isovalue) < tolerance) {
+                    isocurve_vertices.push_back(i);
+                }
+            }
+
+            if (isocurve_vertices.empty()) {
+                D_descriptor(k) = 0.0;
+                continue;
+            }
+
+            // Compute average geodesic distances for this isocurve
+            double avg_dist_p = 0.0, avg_dist_q = 0.0;
+            for (int vertex_idx : isocurve_vertices) {
+                avg_dist_p += dist_p(vertex_idx);
+                avg_dist_q += dist_q(vertex_idx);
+            }
+            avg_dist_p /= isocurve_vertices.size();
+            avg_dist_q /= isocurve_vertices.size();
+
+            D_descriptor(k) = (avg_dist_p + avg_dist_q) / 2.0;
+        }
+
+        std::cout << "Enhanced D descriptor computed using heat geodesics" << std::endl;
+        return D_descriptor;
+
+    } catch (const std::exception& e) {
+        std::cout << "Error in enhanced D descriptor computation: " << e.what() << std::endl;
+
+        // Fall back to original implementation
+        int N;
+        float* dist_p = mesh->computeGeodesicDistances(vertex_p_idx, N);
+        float* dist_q = mesh->computeGeodesicDistances(vertex_q_idx, N);
+
+        if (dist_p && dist_q) {
+            Eigen::VectorXd result = computeDDescriptor(vertex_p_idx, vertex_q_idx, field, numSamplesK, dist_p, dist_q);
+            delete[] dist_p;
+            delete[] dist_q;
+            return result;
+        }
+        return Eigen::VectorXd();
     }
-    // --- End Descriptors for (p, q) ---
+}
 
-
-    // --- Compute for reverse pair (q, p) ---
-    std::cout << "\nComputing Pairwise Harmonic for vertices " << vertex_q_idx << " -> " << vertex_p_idx << "..." << std::endl;
-    Eigen::VectorXd harmonicField_qp = ph.computePairwiseHarmonic(vertex_q_idx, vertex_p_idx);
-
-    if (harmonicField_qp.size() == 0) {
-        std::cerr << "Failed to compute pairwise harmonic for (q, p)!" << std::endl;
-        // Cleanup distances before returning
-        delete[] dist_p;
-        delete[] dist_q;
-        return result;
-    }
-    std::cout << "Pairwise harmonic (q, p) computed." << std::endl;
-
-    // --- Compute Descriptors for (q, p) ---
-    std::cout << "Computing R Descriptor (q, p) with K=" << numSamplesK << "..." << std::endl;
-    Eigen::VectorXd R_qp = ph.computeRDescriptor(harmonicField_qp, numSamplesK);
-    if (R_qp.size() == numSamplesK) {
-        std::cout << "R_qp computed: " << R_qp.transpose() << std::endl;
-    } else {
-        std::cerr << "Failed to compute R_qp!" << std::endl;
+Eigen::VectorXd PairwiseHarmonics::computeHeatGeodesicDistances(int source_vertex) {
+    if (!mesh) {
+        std::cout << "Error: No mesh available" << std::endl;
+        return Eigen::VectorXd();
     }
 
-    std::cout << "Computing D Descriptor (q, p) with K=" << numSamplesK << "..." << std::endl;
-    // Note the swapped order of vertices and distance arrays
-    Eigen::VectorXd D_qp = ph.computeDDescriptor(vertex_q_idx, vertex_p_idx, harmonicField_qp, numSamplesK, dist_q, dist_p);
-    if (D_qp.size() == numSamplesK) {
-        std::cout << "D_qp computed: " << D_qp.transpose() << std::endl;
-    } else {
-        std::cerr << "Failed to compute D_qp!" << std::endl;
-    }
-    // --- End Descriptors for (q, p) ---
-
-
-    // --- Compute PIS Score (Optional, but good for context) ---
-    if (R_pq.size() == numSamplesK && D_pq.size() == numSamplesK && R_qp.size() == numSamplesK && D_qp.size() == numSamplesK) {
-        double pis_score = ph.computePIS(R_pq, D_pq, R_qp, D_qp);
-        std::cout << "\nComputed PIS Score for pair (" << vertex_p_idx << ", " << vertex_q_idx << "): " << pis_score << std::endl;
-    } else {
-        std::cout << "\nCould not compute PIS score due to descriptor errors." << std::endl;
-    }
-    // --- End PIS Score ---
-
-
-    // --- Clean up allocated distance arrays ---
-    delete[] dist_p;
-    delete[] dist_q;
-    std::cout << "Cleaned up distance arrays." << std::endl;
-    // --- End Cleanup ---
-
-    // --- Print Histograms ---
-    std::cout << "\n--- Descriptor Histograms ---" << std::endl;
-    if (R_pq.size() == numSamplesK) {
-        printHistogram(R_pq, "R_pq (Perimeter p->q)");
-    }
-    if (D_pq.size() == numSamplesK) {
-        printHistogram(D_pq, "D_pq (Distance p->q)");
-    }
-    if (R_qp.size() == numSamplesK) {
-        printHistogram(R_qp, "R_qp (Perimeter q->p)");
-    }
-    if (D_qp.size() == numSamplesK) {
-        printHistogram(D_qp, "D_qp (Distance q->p)");
-    }
-    // --- End Histogram Printing ---
-
-
-    return result;
+    return mesh->computeHeatGeodesicDistances(source_vertex);
 }

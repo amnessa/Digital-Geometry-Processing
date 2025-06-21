@@ -75,6 +75,11 @@ void loadMesh();
 void showMainMenu();
 void performFullSegmentation();
 void clearVisualization();
+void testHeatGeodesics();
+void testEnhancedFPS();
+void compareGeodesicMethods();
+void testEnhancedDescriptors();
+void testMeshAnalysis();
 
 /**
  * Load a mesh file and initialize the segmentation system
@@ -100,13 +105,14 @@ void loadMesh() {
     if (g_mesh) {
         delete g_mesh;
         g_mesh = nullptr;
-    }
-
-    // Create and load new mesh
+    }    // Create and load new mesh
     g_mesh = new Mesh();
 
-    cout << "Loading mesh: " << meshPath << "..." << endl;
-    g_mesh->loadOff(const_cast<char*>(meshPath.c_str()));
+    // Construct full path to mesh file in models directory
+    string fullMeshPath = "models/" + meshPath;
+
+    cout << "Loading mesh: " << fullMeshPath << "..." << endl;
+    g_mesh->loadOff(const_cast<char*>(fullMeshPath.c_str()));
     g_mesh->normalizeCoordinates();
 
     cout << "Mesh loaded successfully!" << endl;
@@ -115,10 +121,26 @@ void loadMesh() {
     cout << "  Edges: " << g_mesh->edges.size() << endl;
 
     // Add mesh to visualization
-    g_root->addChild(g_painter->getShapeSep(g_mesh));
-
-    // Initialize pairwise harmonics system
+    g_root->addChild(g_painter->getShapeSep(g_mesh));    // Initialize pairwise harmonics system
     g_harmonics = new PairwiseHarmonics(g_mesh);
+
+    // Initialize LibIGL for robust geometry processing
+    cout << "\nInitializing LibIGL for robust computations..." << endl;
+    if (g_harmonics->initializeLibIGL()) {
+        cout << "LibIGL initialization successful!" << endl;
+
+        // Precompute heat geodesics for fast distance computation
+        cout << "Precomputing heat geodesics for enhanced performance..." << endl;
+        if (g_mesh->precomputeHeatGeodesics()) {
+            cout << "Heat geodesics precomputation successful!" << endl;
+            cout << "  Fast geodesic distance computation is now available" << endl;
+        } else {
+            cout << "Warning: Heat geodesics precomputation failed. Using Dijkstra fallback." << endl;
+        }
+
+    } else {
+        cout << "Warning: LibIGL initialization failed. Some features may not work optimally." << endl;
+    }
 
     // Clear segmentation state
     g_fps_samples.clear();
@@ -127,7 +149,7 @@ void loadMesh() {
     g_nonrigid_nodes.clear();
 
     g_viewer->viewAll();
-    cout << "Mesh ready for pairwise harmonics analysis!" << endl;
+    cout << "Mesh ready for pairwise harmonics analysis with LibIGL support!" << endl;
 }
 
 /**
@@ -667,6 +689,12 @@ void showMainMenu() {
     cout << "10. Enhanced Rigidity Analysis (All Nodes)" << endl;
     cout << "11. Visualize All Rigidity Points (Color-coded)" << endl;
     cout << "12. Interactive Rigidity Threshold Testing" << endl;
+    cout << "--- LIBIGL ENHANCED FEATURES ---" << endl;
+    cout << "13. Test Heat Geodesics (LibIGL)" << endl;
+    cout << "14. Enhanced FPS with Heat Geodesics" << endl;
+    cout << "15. Compare Geodesic Methods (Dijkstra vs Heat)" << endl;
+    cout << "16. Enhanced R&D Descriptors (LibIGL)" << endl;
+    cout << "17. Mesh Analysis (Normals, Curvature, Areas)" << endl;
     cout << "0. Exit" << endl;
     cout << "======================================" << endl;
     cout << "Choose option: ";
@@ -718,6 +746,21 @@ DWORD WINAPI ConsoleInputThread(LPVOID lpParam) {
                 break;
             case 12:
                 RigidityAnalysis::interactiveRigidityThresholdTesting(g_skeletal_segments, g_rigidity_scores, g_root, g_viewer);
+                break;
+            case 13:
+                testHeatGeodesics();
+                break;
+            case 14:
+                testEnhancedFPS();
+                break;
+            case 15:
+                compareGeodesicMethods();
+                break;
+            case 16:
+                testEnhancedDescriptors();
+                break;
+            case 17:
+                testMeshAnalysis();
                 break;
             case 0:
                 cout << "Exiting..." << endl;
