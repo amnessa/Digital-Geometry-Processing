@@ -109,7 +109,7 @@ public:
      * @param vertex_q_idx Index of the second boundary vertex (f=1)
      * @return Vector of harmonic function values for each vertex
      */
-    Eigen::VectorXd computePairwiseHarmonicLibigl(int vertex_p_idx, int vertex_q_idx);
+    Eigen::VectorXd computePairwiseHarmonicLibIGL(int vertex_p_idx, int vertex_q_idx);
 
     /**
      * Compute the pairwise harmonic function between two vertices (original implementation)
@@ -156,41 +156,28 @@ public:
      * @param dist_q Precomputed geodesic distances from vertex q.
      * @return An Eigen::VectorXd of size numSamplesK containing the average geodesic distances for sampled iso-curves.
     */
-   Eigen::VectorXd computeDDescriptor(int vertex_p_idx, int vertex_q_idx, const Eigen::VectorXd& field, int numSamplesK, const float* dist_p, const float* dist_q);
-
-   /**
+   Eigen::VectorXd computeDDescriptor(int vertex_p_idx, int vertex_q_idx, const Eigen::VectorXd& field, int numSamplesK, const float* dist_p, const float* dist_q);   /**
     * Computes the Path Intrinsic Symmetry (PIS) score between two vertices p and q.
-    * Requires the R and D descriptors computed for both (p,q) and (q,p) pairs.
     * @param R_pq R descriptor for the harmonic field f_pq.
     * @param D_pq D descriptor for the harmonic field f_pq.
     * @param R_qp R descriptor for the harmonic field f_qp.
     * @param D_qp D descriptor for the harmonic field f_qp.
     * @return The scalar PIS score. Higher values indicate better symmetry.
     */
-   double computePIS(const Eigen::VectorXd& R_pq, const Eigen::VectorXd& D_pq, const Eigen::VectorXd& R_qp, const Eigen::VectorXd& D_qp);    /**
-     * Extracts the line segments forming the iso-curve for a given value.
-     * @param field The scalar field (e.g., harmonic function) defined on vertices.
-     * @param isoValue The value for which to extract the iso-curve.
-     * @return A vector of pairs, where each pair represents the start and end
-     *         3D coordinates of an iso-curve segment.
+   double computePIS(const Eigen::VectorXd& R_pq, const Eigen::VectorXd& D_pq, const Eigen::VectorXd& R_qp, const Eigen::VectorXd& D_qp);
+
+    /**
+     * Extract isocurve segments from a harmonic field
+     * @param field The harmonic field values
+     * @param isoValue The isocurve level (0 to 1)
+     * @return Vector of line segments representing the isocurve
      */
     std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> extractIsoCurveSegments(const Eigen::VectorXd& field, double isoValue);
 
-    // ========== Enhanced LibIGL Methods ==========
+    // ========== CORE SEGMENTATION FUNCTIONS (Primary Implementation) ==========    /**
+     // Initialize LibIGL matrices and mesh data
+     // Should be called once after mesh loading
 
-    /**
-     * Compute pairwise harmonic field using LibIGL's robust harmonic solver
-     * This is more stable and efficient than manual sparse solving
-     * @param p_idx Index of first boundary vertex
-     * @param q_idx Index of second boundary vertex
-     * @return Harmonic field values at all vertices
-     */
-    Eigen::VectorXd computePairwiseHarmonicLibIGL(int p_idx, int q_idx);
-
-    /**
-     * Initialize LibIGL matrices and mesh data
-     * Should be called once after mesh loading
-     */
     bool initializeLibIGL();
 
     /**

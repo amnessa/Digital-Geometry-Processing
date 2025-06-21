@@ -198,7 +198,7 @@ void VisualizationUtils::testPairwiseHarmonics(
 
     if (implementation_choice == 1) {
         cout << "Using libigl implementation..." << endl;
-        harmonicField = harmonics->computePairwiseHarmonicLibigl(p_idx, q_idx);
+        harmonicField = harmonics->computePairwiseHarmonicLibIGL(p_idx, q_idx);
     } else {
         cout << "Using custom implementation..." << endl;
         harmonicField = harmonics->computePairwiseHarmonic(p_idx, q_idx);

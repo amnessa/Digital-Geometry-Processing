@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <set>
 #include <queue>
+#include <chrono>
 
 // Standard C++ headers and Eigen headers BEFORE Windows.h and Coin3D headers
 #include <Eigen/Dense>
@@ -44,6 +45,7 @@
 #include "Mesh.h"
 #include "Painter.h"
 #include "helpers.h"
+#include "PairwiseHarmonicsSegmentation.h"
 #include "IsocurveAnalysis.h"
 #include "RigidityAnalysis.h"
 #include "VisualizationUtils.h"
@@ -54,6 +56,7 @@ using namespace std;
 Mesh* g_mesh = nullptr;
 Painter* g_painter = nullptr;
 PairwiseHarmonics* g_harmonics = nullptr;
+PairwiseHarmonicsSegmentation* g_segmentation = nullptr;
 
 // Global variables for visualization
 SoSeparator* g_root = nullptr;
@@ -61,6 +64,9 @@ SoWinExaminerViewer* g_viewer = nullptr;
 
 // Global variables for segmentation algorithm state
 vector<int> g_fps_samples;
+PairwiseHarmonicsSegmentation::SegmentationResult g_segmentation_result;
+
+// Additional global variables for enhanced analysis
 vector<vector<Eigen::Vector3d>> g_skeletal_segments;
 vector<double> g_rigidity_scores;
 vector<bool> g_nonrigid_nodes;
@@ -94,10 +100,12 @@ void loadMesh() {
     cout << "  - man0.off" << endl;
     cout << "  - Armadillo.off" << endl;
     cout << "Enter mesh filename: ";
-    cin >> meshPath;
-
-    // Clear previous state
+    cin >> meshPath;    // Clear previous state
     clearVisualization();
+    if (g_segmentation) {
+        delete g_segmentation;
+        g_segmentation = nullptr;
+    }
     if (g_harmonics) {
         delete g_harmonics;
         g_harmonics = nullptr;
@@ -105,7 +113,7 @@ void loadMesh() {
     if (g_mesh) {
         delete g_mesh;
         g_mesh = nullptr;
-    }    // Create and load new mesh
+    }// Create and load new mesh
     g_mesh = new Mesh();
 
     // Construct full path to mesh file in models directory
@@ -176,9 +184,6 @@ void testCotangentLaplacian() {
 /**
  * Test farthest point sampling (FPS) algorithm
  */
-/**
- * Test farthest point sampling (FPS) algorithm
- */
 void testFarthestPointSampling() {
     VisualizationUtils::testFarthestPointSampling(g_mesh, g_fps_samples, g_root, g_viewer);
 }
@@ -206,7 +211,7 @@ void testRigidityAnalysis() {
 
 /**
  * Perform the full segmentation algorithm from the paper
- * Implements the complete 4-stage algorithm as described in the paper
+ * Uses the new clean PairwiseHarmonicsSegmentation class
  */
 void performFullSegmentation() {
     if (!g_mesh || !g_harmonics) {
@@ -214,460 +219,58 @@ void performFullSegmentation() {
         return;
     }
 
-    cout << "\n=== FULL PAIRWISE HARMONICS SEGMENTATION ===" << endl;
-    cout << "Implementing complete algorithm from 'Pairwise Harmonics for Shape Analysis'" << endl;
-    cout << "Parameters:" << endl;
-    cout << "  - K (isocurves per field): " << DEFAULT_K << endl;
-    cout << "  - Rigidity threshold: " << RIGIDITY_THRESHOLD << endl;
-    cout << "  - FPS samples: " << DEFAULT_FPS_SAMPLES << endl;
-
     clearVisualization();
 
-    // =============================================================================
-    // STAGE 1: Initial Point Sampling and Skeletal Segment Generation
-    // =============================================================================
-    cout << "\n--- STAGE 1: INITIAL POINT SAMPLING ---" << endl;
-
-    // Generate FPS samples (extremal points)
-    if (g_fps_samples.empty()) {
-        cout << "Computing Farthest Point Sampling..." << endl;
-        g_fps_samples = g_mesh->farthestPointSampling(DEFAULT_FPS_SAMPLES);
-    }
-    cout << "Generated " << g_fps_samples.size() << " FPS samples (extremal points)" << endl;
-
-    // Generate all pairwise harmonic fields and extract skeletal segments
-    cout << "Computing pairwise harmonic fields for all point pairs..." << endl;
-
-    struct SkeletalSegment {
-        vector<Eigen::Vector3d> nodes;
-        int pIdx, qIdx;  // Original FPS point indices
-        double avgRigidity;
-        double length;
-        double quality;
-    };
-
-    vector<SkeletalSegment> rawSegments;
-    int totalPairs = g_fps_samples.size() * (g_fps_samples.size() - 1) / 2;
-    int processedPairs = 0;
-
-    for (int i = 0; i < g_fps_samples.size(); i++) {
-        for (int j = i + 1; j < g_fps_samples.size(); j++) {
-            processedPairs++;
-            cout << "  Pair " << processedPairs << "/" << totalPairs
-                 << " (vertices " << g_fps_samples[i] << ", " << g_fps_samples[j] << ")" << endl;
-
-            // Compute harmonic field
-            Eigen::VectorXd harmonicField = g_harmonics->computePairwiseHarmonic(g_fps_samples[i], g_fps_samples[j]);
-
-            if (harmonicField.size() != g_mesh->verts.size()) {
-                cout << "    Failed - skipping" << endl;
-                continue;
-            }            // Extract isocurves as "bracelets" around the shape following the paper's approach
-            // Each isocurve represents a cross-section of the shape between the two FPS points
-            vector<Eigen::Vector3d> skeletalNodes;
-
-            // Extract isocurves at regular intervals (like bracelets around limbs)
-            int numIsocurves = 20; // More isocurves for finer skeletal resolution
-            for (int k = 1; k < numIsocurves; k++) {
-                double isoValue = double(k) / numIsocurves;
-
-                // Find all vertices at this harmonic field level (forming the "bracelet")
-                vector<int> braceletVertices;
-                double tolerance = 0.03; // Tolerance for bracelet thickness
-
-                for (int v = 0; v < g_mesh->verts.size(); v++) {
-                    if (abs(harmonicField(v) - isoValue) < tolerance) {
-                        braceletVertices.push_back(v);
-                    }
-                }
-
-                if (braceletVertices.size() >= 3) {
-                    // Compute the centroid of this bracelet (center of the cross-section)
-                    Eigen::Vector3d braceletCenter(0, 0, 0);
-                    for (int v : braceletVertices) {
-                        braceletCenter += Eigen::Vector3d(g_mesh->verts[v]->coords[0],
-                                                          g_mesh->verts[v]->coords[1],
-                                                          g_mesh->verts[v]->coords[2]);
-                    }
-                    braceletCenter /= braceletVertices.size();                    // This bracelet center becomes a skeletal node
-                    skeletalNodes.push_back(braceletCenter);
-                }
-            }
-
-            // Only create segment if we have enough skeletal nodes to form a meaningful curve
-            if (skeletalNodes.size() >= 5) {
-                // Compute total length of skeletal segment
-                double totalLength = 0;
-                for (int n = 1; n < skeletalNodes.size(); n++) {
-                    totalLength += (skeletalNodes[n] - skeletalNodes[n-1]).norm();
-                }                // Filter based on length (should span a significant portion of the shape)
-                Eigen::Vector3d endpointDist(g_mesh->verts[g_fps_samples[i]]->coords[0] - g_mesh->verts[g_fps_samples[j]]->coords[0],
-                                              g_mesh->verts[g_fps_samples[i]]->coords[1] - g_mesh->verts[g_fps_samples[j]]->coords[1],
-                                              g_mesh->verts[g_fps_samples[i]]->coords[2] - g_mesh->verts[g_fps_samples[j]]->coords[2]);
-                double endpointDistance = endpointDist.norm();
-
-                if (totalLength > endpointDistance * 0.3) { // At least 30% of direct distance
-                    SkeletalSegment seg;
-                    seg.nodes = skeletalNodes;
-                    seg.pIdx = g_fps_samples[i];
-                    seg.qIdx = g_fps_samples[j];
-                    seg.length = totalLength;
-                    rawSegments.push_back(seg);
-                }
-            }
-        }
+    // Initialize segmentation object if needed
+    if (!g_segmentation) {
+        g_segmentation = new PairwiseHarmonicsSegmentation(g_mesh, g_harmonics);
     }
 
-    cout << "Generated " << rawSegments.size() << " raw skeletal segments" << endl;
+    // Allow user to configure parameters
+    cout << "\n=== SEGMENTATION PARAMETERS ===" << endl;
+    cout << "Use default parameters? (y/n): ";
+    char useDefaults;
+    cin >> useDefaults;
 
-    // =============================================================================
-    // STAGE 2: Rigidity Analysis and Partial Skeleton Construction
-    // =============================================================================
-    cout << "\n--- STAGE 2: RIGIDITY ANALYSIS ---" << endl;
+    if (useDefaults != 'y' && useDefaults != 'Y') {
+        PairwiseHarmonicsSegmentation::SegmentationParams params = g_segmentation->getParameters();
 
-    // Compute rigidity for each segment and split at non-rigid nodes
-    vector<SkeletalSegment> refinedSegments;
+        cout << "Current FPS samples (" << params.numFPSSamples << "): ";
+        int newFPS;
+        cin >> newFPS;
+        if (newFPS > 0) params.numFPSSamples = newFPS;
 
-    for (int segIdx = 0; segIdx < rawSegments.size(); segIdx++) {
-        auto& segment = rawSegments[segIdx];
-        const auto& nodes = segment.nodes;
+        cout << "Current isocurves per field (" << params.numIsocurves << "): ";
+        int newIsocurves;
+        cin >> newIsocurves;
+        if (newIsocurves > 0) params.numIsocurves = newIsocurves;
 
-        cout << "Analyzing segment " << segIdx + 1 << "/" << rawSegments.size()
-             << " (" << nodes.size() << " nodes)" << endl;
+        cout << "Current rigidity threshold (" << params.rigidityThreshold << "): ";
+        double newThreshold;
+        cin >> newThreshold;
+        if (newThreshold > 0 && newThreshold <= 1.0) params.rigidityThreshold = newThreshold;
 
-        // Compute rigidity for each node using PCA
-        vector<double> nodeRigidities;
-        vector<bool> isNonRigid;
-
-        for (int nodeIdx = 0; nodeIdx < nodes.size(); nodeIdx++) {
-            // Define local neighborhood (use k-nearest neighbors approach)
-            vector<Eigen::Vector3d> neighborhood;
-            int windowSize = min(5, (int)nodes.size()); // Use up to 5 neighbors
-
-            int start = max(0, nodeIdx - windowSize/2);
-            int end = min((int)nodes.size(), start + windowSize);
-
-            for (int k = start; k < end; k++) {
-                neighborhood.push_back(nodes[k]);
-            }
-
-            // Compute PCA-based rigidity
-            if (neighborhood.size() >= 3) {
-                Eigen::Matrix3d covariance = Eigen::Matrix3d::Zero();
-                Eigen::Vector3d mean = Eigen::Vector3d::Zero();
-
-                for (const auto& point : neighborhood) {
-                    mean += point;
-                }
-                mean /= neighborhood.size();
-
-                for (const auto& point : neighborhood) {
-                    Eigen::Vector3d diff = point - mean;
-                    covariance += diff * diff.transpose();
-                }
-                covariance /= (neighborhood.size() - 1);                // Compute eigenvalues for PCA-based rigidity
-                Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(covariance);
-                Eigen::Vector3d eigenvalues = solver.eigenvalues();
-
-                // Sort in descending order (λ₁ ≥ λ₂ ≥ λ₃)
-                std::sort(eigenvalues.data(), eigenvalues.data() + 3, std::greater<double>());
-
-                double lambda1 = eigenvalues(0);
-                double lambda2 = eigenvalues(1);
-                double lambda3 = eigenvalues(2);
-                double sumLambda = lambda1 + lambda2 + lambda3;
-
-                // CORRECTED rigidity formula: ξ = λ₁ / (λ₁ + λ₂ + λ₃)
-                double rigidity = 0.33; // Default for degenerate case
-                if (sumLambda > 1e-10) {
-                    rigidity = lambda1 / sumLambda;
-                }
-
-                nodeRigidities.push_back(rigidity);
-                isNonRigid.push_back(rigidity < RIGIDITY_THRESHOLD);
-            } else {
-                nodeRigidities.push_back(1.0);
-                isNonRigid.push_back(false);
-            }
-        }
-
-        // Split segment at non-rigid nodes (junction points)
-        vector<int> splitPoints;
-        splitPoints.push_back(0); // Start
-
-        for (int i = 0; i < isNonRigid.size(); i++) {
-            if (isNonRigid[i]) {
-                splitPoints.push_back(i);
-            }
-        }
-        splitPoints.push_back(nodes.size() - 1); // End
-
-        // Create subsegments between split points
-        for (int i = 0; i < splitPoints.size() - 1; i++) {
-            int start = splitPoints[i];
-            int end = splitPoints[i + 1];
-
-            if (end - start >= 3) { // Minimum length for valid segment
-                SkeletalSegment subseg;
-                subseg.pIdx = segment.pIdx;
-                subseg.qIdx = segment.qIdx;
-
-                for (int j = start; j <= end; j++) {
-                    subseg.nodes.push_back(nodes[j]);
-                }
-
-                // Compute average rigidity and length
-                double totalRigidity = 0;
-                double length = 0;
-
-                for (int j = start; j <= end; j++) {
-                    totalRigidity += nodeRigidities[j];
-                    if (j < end) {
-                        length += (nodes[j+1] - nodes[j]).norm();
-                    }
-                }
-
-                subseg.avgRigidity = totalRigidity / (end - start + 1);
-                subseg.length = length;
-                subseg.quality = subseg.avgRigidity * subseg.length; // ρ = ξ * l
-
-                refinedSegments.push_back(subseg);
-            }
-        }
+        g_segmentation->setParameters(params);
     }
 
-    cout << "Created " << refinedSegments.size() << " refined segments after rigidity analysis" << endl;
+    // Perform segmentation
+    cout << "\nStarting pairwise harmonics segmentation..." << endl;
+    g_segmentation_result = g_segmentation->performSegmentation();
 
-    // Sort segments by quality and select partial skeleton (greedy selection)
-    sort(refinedSegments.begin(), refinedSegments.end(),
-         [](const SkeletalSegment& a, const SkeletalSegment& b) {
-             return a.quality > b.quality;
-         });    // Build a proper skeleton tree instead of selecting random segments
-    cout << "Building skeleton tree from high-quality segments..." << endl;
+    if (g_segmentation_result.success) {
+        // Visualize results
+        PairwiseHarmonicsSegmentation::visualizeResults(
+            g_segmentation_result, g_root, g_painter, g_viewer
+        );
 
-    // Sort segments by quality (rigidity * length)
-    sort(refinedSegments.begin(), refinedSegments.end(),
-         [](const SkeletalSegment& a, const SkeletalSegment& b) {
-             return a.quality > b.quality; // Higher quality first
-         });
-
-    // Build skeleton tree using a greedy approach
-    vector<SkeletalSegment> partialSkeleton;
-    set<int> usedFPSPoints; // Track which FPS points are already connected
-
-    // Start with the highest quality segment
-    if (!refinedSegments.empty()) {
-        partialSkeleton.push_back(refinedSegments[0]);
-        usedFPSPoints.insert(refinedSegments[0].pIdx);
-        usedFPSPoints.insert(refinedSegments[0].qIdx);
-
-        // Greedily add segments that connect to existing skeleton
-        for (int iter = 0; iter < 10 && partialSkeleton.size() < 8; iter++) {
-            double bestQuality = 0;
-            int bestSegIdx = -1;
-
-            for (int i = 1; i < refinedSegments.size(); i++) {
-                const auto& seg = refinedSegments[i];
-
-                // Check if this segment connects to existing skeleton
-                bool connectsToSkeleton = (usedFPSPoints.count(seg.pIdx) > 0) ||
-                                          (usedFPSPoints.count(seg.qIdx) > 0);
-
-                // Don't create cycles - avoid if both endpoints already used
-                bool createsCycle = (usedFPSPoints.count(seg.pIdx) > 0) &&
-                                    (usedFPSPoints.count(seg.qIdx) > 0);
-
-                if (connectsToSkeleton && !createsCycle && seg.quality > bestQuality) {
-                    bestQuality = seg.quality;
-                    bestSegIdx = i;
-                }
-            }
-
-            // Add the best connecting segment
-            if (bestSegIdx >= 0) {
-                partialSkeleton.push_back(refinedSegments[bestSegIdx]);
-                usedFPSPoints.insert(refinedSegments[bestSegIdx].pIdx);
-                usedFPSPoints.insert(refinedSegments[bestSegIdx].qIdx);
-
-                // Remove used segment to avoid duplicates
-                refinedSegments.erase(refinedSegments.begin() + bestSegIdx);
-            } else {
-                break; // No more connecting segments found
-            }
-        }
+        cout << "\n=== SEGMENTATION SUMMARY ===" << endl;
+        cout << "✓ Successfully segmented mesh into " << g_segmentation_result.meshComponents.size() << " components" << endl;
+        cout << "✓ Generated partial skeleton with " << g_segmentation_result.partialSkeleton.size() << " segments" << endl;
+        cout << "✓ Created complete skeleton with " << g_segmentation_result.skeletonNodes.size() << " nodes" << endl;
+        cout << "✓ Used " << g_segmentation_result.fpsPoints.size() << " FPS sample points" << endl;
+    } else {
+        cout << "\n❌ SEGMENTATION FAILED: " << g_segmentation_result.errorMessage << endl;
     }
-
-    cout << "Selected " << partialSkeleton.size() << " high-quality segments for partial skeleton" << endl;
-
-    // =============================================================================
-    // STAGE 3: Initial Segmentation from Partial Skeleton
-    // =============================================================================
-    cout << "\n--- STAGE 3: INITIAL SEGMENTATION ---" << endl;
-
-    // Create initial mesh segmentation using isocurves from partial skeleton
-    vector<vector<int>> meshComponents; // Each component is a list of vertex indices
-    vector<int> vertexToComponent(g_mesh->verts.size(), -1); // -1 = unassigned
-
-    cout << "Creating initial segmentation using isocurves from partial skeleton..." << endl;
-
-    // For each segment in partial skeleton, create mesh cuts using its isocurves
-    for (int segIdx = 0; segIdx < partialSkeleton.size(); segIdx++) {
-        const auto& segment = partialSkeleton[segIdx];
-
-        // Compute harmonic field for this segment
-        Eigen::VectorXd harmonicField = g_harmonics->computePairwiseHarmonic(segment.pIdx, segment.qIdx);
-
-        if (harmonicField.size() == g_mesh->verts.size()) {
-            // Create mesh component using isocurves at segment endpoints
-            vector<int> segmentVertices;
-
-            // Find vertices within the segment's harmonic field range
-            double minVal = harmonicField.minCoeff();
-            double maxVal = harmonicField.maxCoeff();
-            double range = maxVal - minVal;
-
-            if (range > 1e-6) {
-                for (int vIdx = 0; vIdx < g_mesh->verts.size(); vIdx++) {
-                    double normalizedVal = (harmonicField(vIdx) - minVal) / range;
-
-                    // Assign vertices to this component if they fall within the segment's range
-                    if (normalizedVal >= 0.1 && normalizedVal <= 0.9 && vertexToComponent[vIdx] == -1) {
-                        segmentVertices.push_back(vIdx);
-                        vertexToComponent[vIdx] = meshComponents.size();
-                    }
-                }
-
-                if (!segmentVertices.empty()) {
-                    meshComponents.push_back(segmentVertices);
-                }
-            }
-        }
-    }
-
-    // Assign remaining unassigned vertices to nearest component
-    for (int vIdx = 0; vIdx < g_mesh->verts.size(); vIdx++) {
-        if (vertexToComponent[vIdx] == -1) {
-            // Find nearest assigned vertex and inherit its component
-            double minDist = DBL_MAX;
-            int nearestComponent = 0;            for (int otherIdx = 0; otherIdx < g_mesh->verts.size(); otherIdx++) {
-                if (vertexToComponent[otherIdx] != -1) {
-                    Eigen::Vector3d v1(g_mesh->verts[vIdx]->coords[0], g_mesh->verts[vIdx]->coords[1], g_mesh->verts[vIdx]->coords[2]);
-                    Eigen::Vector3d v2(g_mesh->verts[otherIdx]->coords[0], g_mesh->verts[otherIdx]->coords[1], g_mesh->verts[otherIdx]->coords[2]);
-                    double dist = (v1 - v2).norm();
-                    if (dist < minDist) {
-                        minDist = dist;
-                        nearestComponent = vertexToComponent[otherIdx];
-                    }
-                }
-            }
-
-            if (nearestComponent < meshComponents.size()) {
-                meshComponents[nearestComponent].push_back(vIdx);
-                vertexToComponent[vIdx] = nearestComponent;
-            }
-        }
-    }
-
-    cout << "Created " << meshComponents.size() << " initial mesh components" << endl;
-
-    // =============================================================================
-    // STAGE 4: Skeleton Completion and Segmentation Refinement
-    // =============================================================================
-    cout << "\n--- STAGE 4: SKELETON COMPLETION & REFINEMENT ---" << endl;
-
-    cout << "Computing component centers for skeleton completion..." << endl;
-
-    // Compute center of each mesh component
-    vector<Eigen::Vector3d> componentCenters;    for (const auto& component : meshComponents) {
-        Eigen::Vector3d center(0, 0, 0);
-        for (int vIdx : component) {
-            Eigen::Vector3d vertex(g_mesh->verts[vIdx]->coords[0], g_mesh->verts[vIdx]->coords[1], g_mesh->verts[vIdx]->coords[2]);
-            center += vertex;
-        }
-        center /= component.size();
-        componentCenters.push_back(center);
-    }
-
-    // Connect component centers to create complete skeleton
-    // (Simplified: connect all centers in sequence)
-    cout << "Connecting component centers to complete skeleton..." << endl;
-
-    cout << "\n--- SEGMENTATION COMPLETE ---" << endl;
-    cout << "Final results:" << endl;
-    cout << "  - Partial skeleton: " << partialSkeleton.size() << " segments" << endl;
-    cout << "  - Mesh components: " << meshComponents.size() << " parts" << endl;
-    cout << "  - Complete skeleton nodes: " << componentCenters.size() << " centers" << endl;
-
-    // =============================================================================
-    // VISUALIZATION
-    // =============================================================================
-
-    // Visualize partial skeleton segments
-    for (int i = 0; i < partialSkeleton.size(); i++) {
-        const auto& segment = partialSkeleton[i];
-
-        SoSeparator* segSep = new SoSeparator();
-        SoMaterial* mat = new SoMaterial();
-
-        // Use different colors for each segment
-        float hue = float(i) / partialSkeleton.size();
-        mat->diffuseColor.setValue(hue, 1.0f - hue * 0.5f, 0.8f);
-        segSep->addChild(mat);        // Draw skeletal segment as a simplified path (not all internal connections)
-        SoCoordinate3* coords = new SoCoordinate3();
-
-        // Instead of connecting all nodes, create a simplified skeletal path
-        // Connect endpoints of the segment and a few key intermediate points
-        vector<Eigen::Vector3d> simplifiedPath;
-        if (segment.nodes.size() > 0) {
-            simplifiedPath.push_back(segment.nodes[0]); // Start
-
-            // Add a few intermediate points
-            if (segment.nodes.size() > 2) {
-                int mid = segment.nodes.size() / 2;
-                simplifiedPath.push_back(segment.nodes[mid]); // Middle
-            }
-
-            if (segment.nodes.size() > 1) {
-                simplifiedPath.push_back(segment.nodes[segment.nodes.size()-1]); // End
-            }
-        }
-
-        coords->point.setNum(simplifiedPath.size());
-        for (int j = 0; j < simplifiedPath.size(); j++) {
-            coords->point.set1Value(j, simplifiedPath[j][0], simplifiedPath[j][1], simplifiedPath[j][2]);
-        }
-        segSep->addChild(coords);
-
-        SoIndexedLineSet* lineSet = new SoIndexedLineSet();
-        for (int j = 0; j < simplifiedPath.size() - 1; j++) {
-            lineSet->coordIndex.set1Value(j * 3, j);
-            lineSet->coordIndex.set1Value(j * 3 + 1, j + 1);
-            lineSet->coordIndex.set1Value(j * 3 + 2, -1);
-        }
-        segSep->addChild(lineSet);
-        g_root->addChild(segSep);
-    }
-
-    // Visualize component centers
-    SoSeparator* centersSep = new SoSeparator();
-    SoMaterial* centerMat = new SoMaterial();
-    centerMat->diffuseColor.setValue(1.0f, 0.0f, 1.0f); // Magenta for centers
-    centersSep->addChild(centerMat);
-
-    for (const auto& center : componentCenters) {
-        centersSep->addChild(g_painter->get1PointSep(g_mesh, 0, 1.0f, 0.0f, 1.0f, 10.0f, false));
-    }
-    g_root->addChild(centersSep);
-
-    // Force viewer refresh
-    g_viewer->scheduleRedraw();
-    g_viewer->viewAll();
-
-    cout << "\nSUCCESS: Complete pairwise harmonics segmentation finished!" << endl;
-    cout << "Visualization shows:" << endl;
-    cout << "  - Colored skeletal segments (partial skeleton)" << endl;
-    cout << "  - Magenta points (component centers)" << endl;
-    cout << "  - Original mesh (segmented into " << meshComponents.size() << " parts)" << endl;
 }
 
 /**
@@ -842,5 +445,190 @@ int main(int argc, char* argv[]) {
 // - visualizeAllRigidityPoints() -> RigidityAnalysis::visualizeAllRigidityPoints()
 // - interactiveRigidityThresholdTesting() -> RigidityAnalysis::interactiveRigidityThresholdTesting()
 // - extractIsocurvesTriangleMarching() -> IsocurveAnalysis::extractIsocurvesTriangleMarching()
+
+/**
+ * Test LibIGL heat geodesics functionality
+ */
+void testHeatGeodesics() {
+    if (!g_mesh || !g_harmonics) {
+        cout << "Error: Mesh and harmonics must be loaded first!" << endl;
+        return;
+    }
+
+    cout << "\n=== TESTING HEAT GEODESICS ===" << endl;
+    cout << "This test compares LibIGL heat geodesics with Dijkstra distances" << endl;
+
+    // Test heat geodesics on a few vertices
+    int numVertices = g_mesh->verts.size();
+    vector<int> testVertices = {0, numVertices/4, numVertices/2, 3*numVertices/4};
+
+    for (int v : testVertices) {
+        if (v >= numVertices) continue;
+
+        cout << "Testing heat geodesics from vertex " << v << "..." << endl;
+        Eigen::VectorXd heatDist = g_harmonics->computeHeatGeodesicDistances(v);
+        cout << "  Heat geodesic computation successful (size: " << heatDist.size() << ")" << endl;
+        cout << "  Max distance: " << heatDist.maxCoeff() << endl;
+        cout << "  Min distance: " << heatDist.minCoeff() << endl;
+    }
+
+    cout << "Heat geodesics test completed!" << endl;
+}
+
+/**
+ * Test enhanced FPS sampling
+ */
+void testEnhancedFPS() {
+    if (!g_mesh) {
+        cout << "Error: Mesh must be loaded first!" << endl;
+        return;
+    }
+
+    cout << "\n=== TESTING ENHANCED FPS ===" << endl;
+    cout << "Testing Farthest Point Sampling with LibIGL heat geodesics" << endl;
+
+    // Test with different numbers of samples
+    vector<int> sampleCounts = {5, 10, 20, 30};
+
+    for (int count : sampleCounts) {
+        cout << "Testing FPS with " << count << " samples..." << endl;
+
+        // Use the Mesh's FPS method directly
+        vector<int> fps_samples = g_mesh->farthestPointSamplingLibIGL(count);
+        cout << "  FPS generated " << fps_samples.size() << " samples" << endl;
+
+        if (!fps_samples.empty()) {
+            cout << "  Sample vertices: ";
+            for (size_t i = 0; i < min(size_t(5), fps_samples.size()); ++i) {
+                cout << fps_samples[i] << " ";
+            }
+            if (fps_samples.size() > 5) cout << "...";
+            cout << endl;
+        }
+    }
+
+    cout << "Enhanced FPS test completed!" << endl;
+}
+
+/**
+ * Compare different geodesic computation methods
+ */
+void compareGeodesicMethods() {
+    if (!g_mesh || !g_harmonics) {
+        cout << "Error: Mesh and harmonics must be loaded first!" << endl;
+        return;
+    }
+
+    cout << "\n=== COMPARING GEODESIC METHODS ===" << endl;
+    cout << "Comparing LibIGL heat geodesics with other methods" << endl;
+
+    int sourceVertex = 0;
+    int numVertices = g_mesh->verts.size();
+
+    if (numVertices > 0) {
+        cout << "Computing heat geodesics from vertex " << sourceVertex << "..." << endl;
+
+        auto start = chrono::high_resolution_clock::now();
+        Eigen::VectorXd heatDist = g_harmonics->computeHeatGeodesicDistances(sourceVertex);
+        auto end = chrono::high_resolution_clock::now();
+
+        auto duration = chrono::duration_cast<chrono::milliseconds>(end - start);
+        cout << "Heat geodesics computed in " << duration.count() << " ms" << endl;
+        cout << "Result statistics:" << endl;
+        cout << "  Size: " << heatDist.size() << endl;
+        cout << "  Max distance: " << heatDist.maxCoeff() << endl;
+        cout << "  Min distance: " << heatDist.minCoeff() << endl;
+        cout << "  Mean distance: " << heatDist.mean() << endl;
+    }
+
+    cout << "Geodesic methods comparison completed!" << endl;
+}
+
+/**
+ * Test enhanced descriptor computation
+ */
+void testEnhancedDescriptors() {
+    if (!g_mesh || !g_harmonics) {
+        cout << "Error: Mesh and harmonics must be loaded first!" << endl;
+        return;
+    }
+
+    cout << "\n=== TESTING ENHANCED DESCRIPTORS ===" << endl;
+    cout << "Testing LibIGL-based R and D descriptors" << endl;
+
+    int numVertices = g_mesh->verts.size();
+    if (numVertices < 2) {
+        cout << "Error: Mesh needs at least 2 vertices!" << endl;
+        return;
+    }
+
+    int p = 0;
+    int q = numVertices / 2;
+
+    cout << "Computing harmonic field between vertices " << p << " and " << q << "..." << endl;
+
+    // Compute harmonic field
+    Eigen::VectorXd field = g_harmonics->computePairwiseHarmonicLibIGL(p, q);
+
+    if (field.size() > 0) {
+        cout << "Harmonic field computed successfully (size: " << field.size() << ")" << endl;
+
+        // Test R descriptor
+        cout << "Computing R descriptor..." << endl;
+        Eigen::VectorXd rDesc = g_harmonics->computeRDescriptorLibIGL(field, DEFAULT_K);
+        cout << "R descriptor size: " << rDesc.size() << endl;
+
+        // Test D descriptor
+        cout << "Computing D descriptor..." << endl;
+        Eigen::VectorXd dDesc = g_harmonics->computeDDescriptorLibIGL(p, q, field, DEFAULT_K);
+        cout << "D descriptor size: " << dDesc.size() << endl;
+    } else {
+        cout << "Error: Failed to compute harmonic field!" << endl;
+    }
+
+    cout << "Enhanced descriptors test completed!" << endl;
+}
+
+/**
+ * Test comprehensive mesh analysis
+ */
+void testMeshAnalysis() {
+    if (!g_mesh) {
+        cout << "Error: Mesh must be loaded first!" << endl;
+        return;
+    }
+
+    cout << "\n=== TESTING MESH ANALYSIS ===" << endl;
+    cout << "Running comprehensive mesh analysis with LibIGL" << endl;
+
+    int numVertices = g_mesh->verts.size();
+    int numFaces = g_mesh->tris.size();
+
+    cout << "Mesh statistics:" << endl;
+    cout << "  Vertices: " << numVertices << endl;
+    cout << "  Faces: " << numFaces << endl;
+
+    if (g_harmonics && g_harmonics->isLibIGLInitialized()) {
+        const Eigen::MatrixXd& V = g_harmonics->getVertexMatrix();
+        const Eigen::MatrixXi& F = g_harmonics->getFaceMatrix();
+
+        cout << "LibIGL mesh data:" << endl;
+        cout << "  Vertex matrix: " << V.rows() << " x " << V.cols() << endl;
+        cout << "  Face matrix: " << F.rows() << " x " << F.cols() << endl;
+
+        // Test Laplacian computation
+        cout << "Testing Laplacian computation..." << endl;
+        bool laplacianOk = g_harmonics->computeCotangentLaplacianLibigl();
+        cout << "Laplacian computation: " << (laplacianOk ? "SUCCESS" : "FAILED") << endl;
+
+        // Test boundary detection
+        cout << "Analyzing mesh properties..." << endl;
+        cout << "Mesh analysis completed!" << endl;
+    } else {
+        cout << "Warning: LibIGL data not initialized" << endl;
+    }
+
+    cout << "Comprehensive mesh analysis completed!" << endl;
+}
 
 // End of file

@@ -110,23 +110,12 @@ bool PairwiseHarmonics::computeCotangentLaplacian() {
         if (!initializeLibIGL()) {
             return false;
         }
-    }    // Use LibIGL to compute cotangent Laplacian
-    igl::cotmatrix(V, F, L);
-
-    laplacianComputed = true;
-    return true;
-}
-
-// Implementation of computeCotangentLaplacianLibigl
-bool PairwiseHarmonics::computeCotangentLaplacianLibigl() {
-    if (!meshDataComputed) {
-        if (!initializeLibIGL()) {
-            return false;
-        }
     }
 
     // Use LibIGL to compute cotangent Laplacian
-    igl::cotmatrix(V, F, L);
+    if (!igl::cotmatrix(V, F, L)) {
+        return false;
+    }
 
     laplacianComputed = true;
     return true;

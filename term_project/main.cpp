@@ -1,50 +1,15 @@
-#include "pch.h"  // Include precompiled header first
+// This file is deprecated. Please use main_segmentation.cpp instead.
+// This implementation focuses specifically on the Pairwise Harmonics Segmentation algorithm
+// from "Pairwise Harmonics for Shape Analysis" by Zheng et al., IEEE TVCG 2013
 
-#include <stdio.h>
-#include <cstdlib>
-#include <time.h>
-#include <stdint.h>
-#include <cfloat>
 #include <iostream>
-#include <string>
-#include <vector>
-#include <algorithm>
-#include <set>
-#include <queue>
 
-// Standard C++ headers and Eigen headers BEFORE Windows.h and Coin3D headers
-#include <Eigen/Dense>
-
-// Windows headers with macro protection
-#define NOMINMAX
-#include <windows.h>
-
-// Coin3D/SoWin headers
-#include <Inventor/Win/SoWin.h>
-#include <Inventor/Win/viewers/SoWinExaminerViewer.h>
-#include <Inventor/nodes/SoSeparator.h>
-#include <Inventor/nodes/SoMaterial.h>
-#include <Inventor/nodes/SoCoordinate3.h>
-#include <Inventor/nodes/SoFaceSet.h>
-#include <Inventor/nodes/SoDrawStyle.h>
-#include <Inventor/nodes/SoCone.h>
-#include <Inventor/events/SoKeyboardEvent.h>
-#include <Inventor/events/SoMouseButtonEvent.h>
-#include <Inventor/nodes/SoEventCallback.h>
-#include <Inventor/SoPickedPoint.h>
-#include <Inventor/actions/SoRayPickAction.h>
-#include <Inventor/actions/SoHandleEventAction.h>
-#include <Inventor/SbVec3f.h>
-#include <Inventor/nodes/SoIndexedFaceSet.h>
-#include <Inventor/nodes/SoIndexedLineSet.h>
-#include <Inventor/nodes/SoPointSet.h>
-
-// Project headers
-#include "Mesh.h"
-#include "Painter.h"
-#include "helpers.h"
-
-using namespace std;
+int main() {
+    std::cout << "This main.cpp is deprecated." << std::endl;
+    std::cout << "Please compile and run main_segmentation.cpp instead." << std::endl;
+    std::cout << "It contains the focused implementation of the Pairwise Harmonics Segmentation algorithm." << std::endl;
+    return 0;
+}
 
 // Forward declarations
 DWORD WINAPI ConsoleInputThread(LPVOID lpParam);

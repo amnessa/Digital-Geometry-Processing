@@ -14,8 +14,6 @@ if(MSVC)
     add_definitions(-DEIGEN_STRONG_INLINE=inline)
     # Disable certain warnings for cleaner output
     add_compile_options(/wd4996 /wd4267 /wd4244)
-    # Fix object file size limit for large template instantiations
-    add_compile_options(/bigobj)
 endif()
 
 # Find required dependencies
@@ -53,14 +51,11 @@ endif()
 
 # Core source files for the clean implementation
 set(CORE_SOURCES
-    main_segmentation.cpp
+    main_clean.cpp
     Mesh.cpp
     Painter.cpp
     helpers.cpp
     PairwiseHarmonicsSegmentation.cpp
-    IsocurveAnalysis.cpp
-    RigidityAnalysis.cpp
-    VisualizationUtils.cpp
 )
 
 # Create the main executable

@@ -1158,11 +1158,11 @@ Eigen::VectorXd Mesh::computeHeatGeodesicDistances(int source_vertex) {
     if (source_vertex < 0 || source_vertex >= V.rows()) {
         std::cout << "Error: Invalid source vertex index: " << source_vertex << std::endl;
         return Eigen::VectorXd();
-    }
-
-    try {
+    }    try {
         Eigen::VectorXd distances;
-        igl::heat_geodesics_solve(heat_data, source_vertex, distances);
+        Eigen::VectorXi gamma(1);
+        gamma(0) = source_vertex;
+        igl::heat_geodesics_solve(heat_data, gamma, distances);
 
         std::cout << "Computed heat geodesic distances from vertex " << source_vertex << std::endl;
         return distances;
