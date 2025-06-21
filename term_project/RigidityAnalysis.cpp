@@ -167,7 +167,7 @@ void RigidityAnalysis::visualizeAllRigidityPoints(
     if (rigidity_scores.empty() || skeletal_segments.empty()) {
         cout << "Error: Please run enhanced rigidity analysis first!" << endl;        return;
     }    cout << "\n=== VISUALIZING ALL RIGIDITY POINTS ===" << endl;
-    cout << "Showing continuous rigidity distribution: Green = Low Rigidity (Junctions), Red = High Rigidity (Limbs)" << endl;
+    cout << "Showing continuous rigidity distribution: GREEN = High Rigidity (Limb Centers), RED = Low Rigidity (Junctions)" << endl;
 
     // Add downsampling to reduce visual clutter
     int downsample_factor = 10; // Show every 10th point
@@ -210,21 +210,20 @@ void RigidityAnalysis::visualizeAllRigidityPoints(
     double maxRig = *std::max_element(rigidity_scores.begin(), rigidity_scores.end());
 
     cout << "Rigidity range: [" << minRig << ", " << maxRig << "]" << endl;
-    cout << "Color mapping: Green (≤" << minRig + 0.3 * (maxRig - minRig) << ") -> Yellow -> Red (≥" << maxRig - 0.1 * (maxRig - minRig) << ")" << endl;    // Create visualization for each node (with downsampling to reduce clutter)
+    cout << "Color mapping: GREEN (≥" << maxRig - 0.1 * (maxRig - minRig) << ") -> Yellow -> RED (≤" << minRig + 0.3 * (maxRig - minRig) << ")" << endl;    // Create visualization for each node (with downsampling to reduce clutter)
     int visualized_count = 0;
     for (int i = 0; i < allNodes.size(); i++) {
         // Apply downsampling - only visualize every Nth point
         if (i % downsample_factor != 0) continue;
 
         double rigidity = rigidity_scores[i];
-        const Eigen::Vector3d& node = allNodes[i];
-
-        // Compute color based on rigidity (green to red gradient)
+        const Eigen::Vector3d& node = allNodes[i];        // Compute color based on rigidity (GREEN = high rigidity, RED = low rigidity)
         double normalizedRig = (maxRig - minRig) > 1e-10 ? (rigidity - minRig) / (maxRig - minRig) : 0.5;
 
-        // Color mapping: Green (low rigidity/junctions) to Red (high rigidity/limbs)
-        float r = std::min(1.0f, (float)(2.0 * normalizedRig));           // 0→1 as rigidity increases
-        float g = std::min(1.0f, (float)(2.0 * (1.0 - normalizedRig)));   // 1→0 as rigidity increases
+        // Color mapping: GREEN (high rigidity/limb centers) to RED (low rigidity/junctions)
+        // This matches the paper convention where green indicates rigid skeletal parts
+        float g = std::min(1.0f, (float)(2.0 * normalizedRig));           // 0→1 as rigidity increases (green for high rigidity)
+        float r = std::min(1.0f, (float)(2.0 * (1.0 - normalizedRig)));   // 1→0 as rigidity increases (red for low rigidity)
         float b = 0.1f;  // Small amount of blue for better visibility
 
         Eigen::Vector3f color(r, g, b);
@@ -242,20 +241,17 @@ void RigidityAnalysis::visualizeAllRigidityPoints(
     // Create legend spheres
     double legendX = maxBounds[0] + 0.2 * (maxBounds[0] - minBounds[0]);
     double legendStartY = maxBounds[1];
-    double legendSpacing = 0.1 * (maxBounds[1] - minBounds[1]);
-
-    for (int i = 0; i < 5; i++) {
-        double legendRig = double(i) / 4.0; // 0 to 1
-
-        float r = std::min(1.0f, (float)(2.0 * legendRig));
-        float g = std::min(1.0f, (float)(2.0 * (1.0 - legendRig)));
+    double legendSpacing = 0.1 * (maxBounds[1] - minBounds[1]);    for (int i = 0; i < 5; i++) {
+        double legendRig = double(i) / 4.0; // 0 to 1        // Corrected legend colors: Green for high rigidity, Red for low rigidity
+        float g = std::min(1.0f, (float)(2.0 * legendRig));           // Green for high rigidity
+        float r = std::min(1.0f, (float)(2.0 * (1.0 - legendRig)));   // Red for low rigidity
         float b = 0.1f;
 
         Eigen::Vector3d legendPos(legendX, legendStartY - i * legendSpacing, (maxBounds[2] + minBounds[2]) / 2);
         Eigen::Vector3f legendColor(r, g, b);
         SoSeparator* legendSphere = createColoredSphere(legendPos, legendColor, baseSphereRadius * 1.5f);
         root->addChild(legendSphere);
-    }    // Count nodes in different rigidity ranges for feedback (from downsampled visualization)
+    }// Count nodes in different rigidity ranges for feedback (from downsampled visualization)
     int lowRig = 0, medRig = 0, highRig = 0;
     double lowThresh = minRig + 0.33 * (maxRig - minRig);
     double highThresh = minRig + 0.67 * (maxRig - minRig);
@@ -268,11 +264,10 @@ void RigidityAnalysis::visualizeAllRigidityPoints(
         else highRig++;
     }
 
-    cout << "\nVisualization complete!" << endl;
-    cout << "Downsampled node distribution (showing every " << downsample_factor << "th point):" << endl;
-    cout << "  Low rigidity (Green, potential junctions): " << lowRig << " nodes shown" << endl;
+    cout << "\nVisualization complete!" << endl;    cout << "Downsampled node distribution (showing every " << downsample_factor << "th point):" << endl;
+    cout << "  Low rigidity (Red, potential junctions): " << lowRig << " nodes shown" << endl;
     cout << "  Medium rigidity (Yellow): " << medRig << " nodes shown" << endl;
-    cout << "  High rigidity (Red, limb centers): " << highRig << " nodes shown" << endl;
+    cout << "  High rigidity (Green, skeleton centers): " << highRig << " nodes shown" << endl;
     cout << "  Total visualized: " << (lowRig + medRig + highRig) << " out of " << rigidity_scores.size() << " total points" << endl;
     cout << "\nLegend spheres placed on the right side of the model" << endl;
 

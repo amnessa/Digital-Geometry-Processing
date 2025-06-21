@@ -253,11 +253,9 @@ void visualizeResults() {
     clearVisualization();
 
     // Add base mesh
-    g_root->addChild(g_painter->getShapeSep(g_mesh));
-
-    // Visualize using the segmentation class
+    g_root->addChild(g_painter->getShapeSep(g_mesh));    // Visualize using the segmentation class
     PairwiseHarmonicsSegmentation::visualizeResults(
-        g_result, g_root, g_painter, g_viewer
+        g_result, g_root, g_painter, g_viewer, g_mesh
     );
 
     g_viewer->viewAll();

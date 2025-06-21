@@ -101,9 +101,8 @@ PairwiseHarmonicsSegmentation::generateSkeletalSegments(const vector<int>& fpsPo
 
     for (int i = 0; i < fpsPoints.size(); i++) {
         for (int j = i + 1; j < fpsPoints.size(); j++) {
-            processedPairs++;
-
-            if (processedPairs % 10 == 0 || processedPairs <= 5) {
+            processedPairs++;            // Reduce verbose output - show only sample of progress
+            if (processedPairs % 20 == 0 || processedPairs <= 5 || processedPairs >= totalPairs - 2) {
                 cout << "  Pair " << processedPairs << "/" << totalPairs
                      << " (vertices " << fpsPoints[i] << ", " << fpsPoints[j] << ")" << endl;
             }
@@ -408,7 +407,8 @@ void PairwiseHarmonicsSegmentation::visualizeResults(
     const SegmentationResult& result,
     SoSeparator* root,
     Painter* painter,
-    SoWinExaminerViewer* viewer) {
+    SoWinExaminerViewer* viewer,
+    Mesh* mesh) {
 
     if (!result.success) {
         cout << "Cannot visualize failed segmentation: " << result.errorMessage << endl;
@@ -446,7 +446,62 @@ void PairwiseHarmonicsSegmentation::visualizeResults(
             lineSet->coordIndex.set1Value(j * 3 + 2, -1);
         }
         segSep->addChild(lineSet);
-        root->addChild(segSep);
+        root->addChild(segSep);    }
+
+    // Visualize mesh components with different colors
+    if (!result.meshComponents.empty()) {
+        cout << "Adding mesh component visualization..." << endl;
+
+        // Generate distinct colors for each component
+        vector<Eigen::Vector3f> componentColors;
+        for (int i = 0; i < result.meshComponents.size(); i++) {
+            float hue = float(i) / float(result.meshComponents.size()) * 360.0f;
+            // Convert HSV to RGB for distinct colors
+            float r, g, b;
+            if (hue < 60) {
+                r = 1.0f; g = hue / 60.0f; b = 0.0f;
+            } else if (hue < 120) {
+                r = (120 - hue) / 60.0f; g = 1.0f; b = 0.0f;
+            } else if (hue < 180) {
+                r = 0.0f; g = 1.0f; b = (hue - 120) / 60.0f;
+            } else if (hue < 240) {
+                r = 0.0f; g = (240 - hue) / 60.0f; b = 1.0f;
+            } else if (hue < 300) {
+                r = (hue - 240) / 60.0f; g = 0.0f; b = 1.0f;
+            } else {
+                r = 1.0f; g = 0.0f; b = (360 - hue) / 60.0f;
+            }
+            componentColors.push_back(Eigen::Vector3f(r * 0.8f, g * 0.8f, b * 0.8f)); // Slightly dimmed
+        }
+
+        // Visualize each component with its color
+        for (int compIdx = 0; compIdx < result.meshComponents.size(); compIdx++) {
+            const auto& component = result.meshComponents[compIdx];
+            if (component.vertexIndices.empty()) continue;
+
+            SoSeparator* compSep = new SoSeparator();
+            SoMaterial* compMat = new SoMaterial();
+            const Eigen::Vector3f& color = componentColors[compIdx];
+            compMat->diffuseColor.setValue(color[0], color[1], color[2]);
+            compSep->addChild(compMat);
+
+            // Create point set for component vertices
+            SoCoordinate3* compCoords = new SoCoordinate3();
+            compCoords->point.setNum(component.vertexIndices.size());            for (int i = 0; i < component.vertexIndices.size(); i++) {
+                int vIdx = component.vertexIndices[i];
+                if (vIdx >= 0 && vIdx < mesh->verts.size()) {
+                    Vertex* v = mesh->verts[vIdx];
+                    compCoords->point.set1Value(i, v->coords[0], v->coords[1], v->coords[2]);
+                }
+            }
+            compSep->addChild(compCoords);
+
+            SoPointSet* pointSet = new SoPointSet();
+            pointSet->numPoints = component.vertexIndices.size();
+            compSep->addChild(pointSet);
+
+            root->addChild(compSep);
+        }
     }
 
     // Visualize component centers

@@ -367,9 +367,14 @@ Eigen::VectorXd PairwiseHarmonics::computeDDescriptorLibIGL(int vertex_p_idx, in
 }
 
 Eigen::VectorXd PairwiseHarmonics::computeHeatGeodesicDistances(int source_vertex) {
-    // Placeholder for heat geodesic implementation
-    // For now, return zeros
-    Eigen::VectorXd distances = Eigen::VectorXd::Zero(mesh->verts.size());
+    // Use the mesh's heat geodesic implementation
+    if (mesh) {
+        return mesh->computeHeatGeodesicDistances(source_vertex);
+    }
+
+    // Fallback: return zeros if mesh is not available
+    cout << "Warning: No mesh available for heat geodesic computation" << endl;
+    Eigen::VectorXd distances = Eigen::VectorXd::Zero(mesh ? mesh->verts.size() : 0);
     return distances;
 }
 

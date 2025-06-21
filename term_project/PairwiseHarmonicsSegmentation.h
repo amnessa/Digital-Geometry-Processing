@@ -93,20 +93,20 @@ public:
      * Perform the complete 4-stage segmentation algorithm
      * @return Segmentation result containing all output data
      */
-    SegmentationResult performSegmentation();
-
-    /**
+    SegmentationResult performSegmentation();    /**
      * Visualize segmentation results
      * @param result The segmentation result to visualize
      * @param root Scene graph root
      * @param painter Painter object for visualization
      * @param viewer 3D viewer for rendering
+     * @param mesh Mesh object for vertex access
      */
     static void visualizeResults(
         const SegmentationResult& result,
         SoSeparator* root,
         Painter* painter,
-        SoWinExaminerViewer* viewer
+        SoWinExaminerViewer* viewer,
+        Mesh* mesh
     );
 
     /**

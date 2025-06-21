@@ -117,9 +117,7 @@ void loadMesh() {
     g_mesh = new Mesh();
 
     // Construct full path to mesh file in models directory
-    string fullMeshPath = "models/" + meshPath;
-
-    cout << "Loading mesh: " << fullMeshPath << "..." << endl;
+    string fullMeshPath = "models/" + meshPath;    cout << "Loading mesh: " << fullMeshPath << "..." << endl;
     g_mesh->loadOff(const_cast<char*>(fullMeshPath.c_str()));
     g_mesh->normalizeCoordinates();
 
@@ -128,8 +126,12 @@ void loadMesh() {
     cout << "  Triangles: " << g_mesh->tris.size() << endl;
     cout << "  Edges: " << g_mesh->edges.size() << endl;
 
+    // Convert mesh to LibIGL format for enhanced processing
+    cout << "\nConverting mesh to LibIGL format..." << endl;
+    g_mesh->convertToLibIGL();
+
     // Add mesh to visualization
-    g_root->addChild(g_painter->getShapeSep(g_mesh));    // Initialize pairwise harmonics system
+    g_root->addChild(g_painter->getShapeSep(g_mesh));// Initialize pairwise harmonics system
     g_harmonics = new PairwiseHarmonics(g_mesh);
 
     // Initialize LibIGL for robust geometry processing
@@ -257,19 +259,18 @@ void performFullSegmentation() {
     cout << "\nStarting pairwise harmonics segmentation..." << endl;
     g_segmentation_result = g_segmentation->performSegmentation();
 
-    if (g_segmentation_result.success) {
-        // Visualize results
+    if (g_segmentation_result.success) {        // Visualize results
         PairwiseHarmonicsSegmentation::visualizeResults(
-            g_segmentation_result, g_root, g_painter, g_viewer
+            g_segmentation_result, g_root, g_painter, g_viewer, g_mesh
         );
 
         cout << "\n=== SEGMENTATION SUMMARY ===" << endl;
-        cout << "✓ Successfully segmented mesh into " << g_segmentation_result.meshComponents.size() << " components" << endl;
-        cout << "✓ Generated partial skeleton with " << g_segmentation_result.partialSkeleton.size() << " segments" << endl;
-        cout << "✓ Created complete skeleton with " << g_segmentation_result.skeletonNodes.size() << " nodes" << endl;
-        cout << "✓ Used " << g_segmentation_result.fpsPoints.size() << " FPS sample points" << endl;
+        cout << "-> Successfully segmented mesh into " << g_segmentation_result.meshComponents.size() << " components" << endl;
+        cout << "-> Generated partial skeleton with " << g_segmentation_result.partialSkeleton.size() << " segments" << endl;
+        cout << "-> Created complete skeleton with " << g_segmentation_result.skeletonNodes.size() << " nodes" << endl;
+        cout << "-> Used " << g_segmentation_result.fpsPoints.size() << " FPS sample points" << endl;
     } else {
-        cout << "\n❌ SEGMENTATION FAILED: " << g_segmentation_result.errorMessage << endl;
+        cout << "\n[X] SEGMENTATION FAILED: " << g_segmentation_result.errorMessage << endl;
     }
 }
 

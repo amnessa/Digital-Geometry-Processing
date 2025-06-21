@@ -1133,11 +1133,21 @@ bool Mesh::precomputeHeatGeodesics() {
         return false;
     }
 
-    try {
-        // Precompute heat geodesics data
-        igl::heat_geodesics_precompute(V, F, heat_data);
-        heat_geodesics_precomputed = true;
+    // Check mesh validity
+    if (V.rows() < 4 || F.rows() < 1) {
+        std::cout << "Error: Mesh too small for heat geodesics (need at least 4 vertices and 1 face)" << std::endl;
+        return false;
+    }
 
+    try {
+        std::cout << "Precomputing heat geodesics for mesh with " << V.rows() << " vertices and " << F.rows() << " faces..." << std::endl;        // Precompute heat geodesics data with error checking
+        bool success = igl::heat_geodesics_precompute(V, F, heat_data);
+        if (!success) {
+            std::cout << "Error: LibIGL heat geodesics precomputation failed" << std::endl;
+            return false;
+        }
+
+        heat_geodesics_precomputed = true;
         std::cout << "Successfully precomputed heat geodesics data" << std::endl;
         return true;
     } catch (const std::exception& e) {
@@ -1162,9 +1172,23 @@ Eigen::VectorXd Mesh::computeHeatGeodesicDistances(int source_vertex) {
         Eigen::VectorXd distances;
         Eigen::VectorXi gamma(1);
         gamma(0) = source_vertex;
+
         igl::heat_geodesics_solve(heat_data, gamma, distances);
 
-        std::cout << "Computed heat geodesic distances from vertex " << source_vertex << std::endl;
+        // Check if distances are valid (not all zeros)
+        if (distances.size() == 0) {
+            std::cout << "Error: Heat geodesics returned empty distance vector" << std::endl;
+            return Eigen::VectorXd();
+        }
+
+        double maxDist = distances.maxCoeff();
+        double minDist = distances.minCoeff();
+        if (maxDist == 0.0 && minDist == 0.0) {
+            std::cout << "Warning: Heat geodesics returned all zero distances - this may indicate a mesh topology issue" << std::endl;
+        }
+
+        std::cout << "Computed heat geodesic distances from vertex " << source_vertex
+                  << " (range: " << minDist << " to " << maxDist << ")" << std::endl;
         return distances;
     } catch (const std::exception& e) {
         std::cout << "Error computing heat geodesic distances: " << e.what() << std::endl;
