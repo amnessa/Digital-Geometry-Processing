@@ -420,11 +420,10 @@ void PairwiseHarmonicsSegmentation::visualizeResults(
         const auto& segment = result.partialSkeleton[i];
 
         SoSeparator* segSep = new SoSeparator();
-        SoMaterial* mat = new SoMaterial();
-
-        // Color by rigidity: red = high rigidity, blue = low rigidity
+        SoMaterial* mat = new SoMaterial();        // Color by rigidity: green = high rigidity (skeletal centers), red = low rigidity (junctions)
+        // This matches the paper convention and other modules
         float rigidity = static_cast<float>(segment.avgRigidity);
-        mat->diffuseColor.setValue(rigidity, 0.2f, 1.0f - rigidity);
+        mat->diffuseColor.setValue(1.0f - rigidity, rigidity, 0.2f); // RGB: red decreases, green increases with rigidity
         segSep->addChild(mat);
 
         // Create simplified skeletal path

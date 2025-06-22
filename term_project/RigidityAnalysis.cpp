@@ -371,36 +371,31 @@ void RigidityAnalysis::interactiveRigidityThresholdTesting(
 
         for (int i = 0; i < allNodes.size() && i < rigidity_scores.size(); i++) {
             const Eigen::Vector3d& node = allNodes[i];
-            double rigidity = rigidity_scores[i];
-
-            // Color based on threshold classification
+            double rigidity = rigidity_scores[i];            // Color based on threshold classification (CORRECTED COLORS)
             float r, g, b;
             float radius;
             if (rigidity >= threshold) {
-                // Rigid node - use blue to red gradient based on how rigid it is
-                double normalizedRig = (rigidity - threshold) / (maxRig - threshold + 1e-10);
-                r = std::min(1.0f, (float)normalizedRig);
-                g = 0.2f;
-                b = 1.0f - std::min(1.0f, (float)normalizedRig);
-                radius = baseRadius;
-            } else {
-                // Non-rigid node - use green (potential junction)
+                // Rigid node - use GREEN (skeletal centers)
                 r = 0.0f;
                 g = 1.0f;
                 b = 0.2f;
+                radius = baseRadius;
+            } else {
+                // Non-rigid node - use RED (junctions)
+                r = 1.0f;
+                g = 0.2f;
+                b = 0.0f;
                 radius = junctionRadius; // Larger spheres for junction points
             }
 
             Eigen::Vector3f color(r, g, b);
             SoSeparator* pointViz = createColoredSphere(node, color, radius);
             root->addChild(pointViz);
-        }
-
-        // Show interpretation guide
+        }        // Show interpretation guide
         cout << "\nVisualization Guide:" << endl;
-        cout << "  GREEN spheres (large): Non-rigid nodes = Junction candidates" << endl;
-        cout << "  BLUE-to-RED spheres (small): Rigid nodes = Skeletal centers" << endl;
-        cout << "  -> For human models, you want ~4-8 green junction points" << endl;
+        cout << "  GREEN spheres (small): Rigid nodes = Skeletal centers" << endl;
+        cout << "  RED spheres (large): Non-rigid nodes = Junction candidates" << endl;
+        cout << "  -> For human models, you want ~4-8 red junction points" << endl;
         cout << "  -> (shoulders, hips, neck, wrists, ankles, etc.)" << endl;
 
         viewer->scheduleRedraw();

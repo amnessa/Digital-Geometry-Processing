@@ -50,44 +50,27 @@ void VisualizationUtils::testCotangentLaplacian(
     if (!mesh || !harmonics) {
         cout << "Error: Please load a mesh first!" << endl;
         return;
-    }
-
-    cout << "\n=== TESTING COTANGENT LAPLACIAN ===" << endl;
-    cout << "Choose implementation:" << endl;
-    cout << "1. libigl-based (recommended - more robust)" << endl;
-    cout << "2. Custom implementation (original)" << endl;
-    cout << "Enter choice (1 or 2): ";
-
-    int choice;
-    cin >> choice;
+    }    cout << "\n=== TESTING COTANGENT LAPLACIAN ===" << endl;
+    cout << "Using LibIGL implementation (robust, industry-standard)" << endl;
 
     bool success = false;
     auto start = clock();
 
-    if (choice == 1) {
-        cout << "Computing cotangent Laplacian using libigl..." << endl;
-        success = harmonics->computeCotangentLaplacianLibigl();
-    } else {
-        cout << "Computing cotangent Laplacian using custom implementation..." << endl;
-        success = harmonics->computeCotangentLaplacian();
-    }
+    cout << "Computing cotangent Laplacian using libigl..." << endl;
+    success = harmonics->computeCotangentLaplacianLibigl();
 
     auto end = clock();
     double elapsed = double(end - start) / CLOCKS_PER_SEC;
 
     if (success) {
         cout << "SUCCESS: Cotangent Laplacian computed successfully!" << endl;
-        cout << "  Implementation: " << (choice == 1 ? "libigl" : "custom") << endl;
+        cout << "  Implementation: libigl" << endl;
         cout << "  Computation time: " << elapsed << " seconds" << endl;
         cout << "  Matrix size: " << mesh->verts.size() << "x" << mesh->verts.size() << endl;
         cout << "  Properties:" << endl;
         cout << "    - Intrinsic (uses cotangent weights)" << endl;
-        if (choice == 1) {
-            cout << "    - libigl robust implementation" << endl;
-            cout << "    - Includes mass matrix computation" << endl;
-        } else {
-            cout << "    - Includes Voronoi area weighting" << endl;
-        }
+        cout << "    - libigl robust implementation" << endl;
+        cout << "    - Includes mass matrix computation" << endl;
         cout << "    - Symmetric and positive semi-definite" << endl;
         cout << "    - Ready for harmonic field computation" << endl;
     } else {
@@ -104,9 +87,17 @@ void VisualizationUtils::testFarthestPointSampling(
     if (!mesh) {
         cout << "Error: Please load a mesh first!" << endl;
         return;
-    }
+    }    cout << "\n=== TESTING FARTHEST POINT SAMPLING ===" << endl;
 
-    cout << "\n=== TESTING FARTHEST POINT SAMPLING ===" << endl;
+    // Give user choice of algorithm
+    cout << "Choose FPS implementation:" << endl;
+    cout << "1. Heat geodesics (LibIGL) - Fast and accurate" << endl;
+    cout << "2. Dijkstra (original) - Slower but reliable" << endl;
+    cout << "Enter choice (1 or 2): ";
+
+    int algorithm_choice;
+    cin >> algorithm_choice;
+
     int numSamples;
     cout << "Enter number of FPS samples (recommended: 25-40 for human models, 15-25 for simple shapes): ";
     cin >> numSamples;
@@ -117,15 +108,22 @@ void VisualizationUtils::testFarthestPointSampling(
     }
 
     cout << "Computing FPS with " << numSamples << " points..." << endl;
-    cout << "Algorithm: 1) Pick arbitrary point -> 2) Find farthest -> 3) Discard arbitrary -> 4) Continue FPS" << endl;
+    if (algorithm_choice == 1) {
+        cout << "Algorithm: LibIGL Heat Geodesics-based FPS (faster, more accurate)" << endl;
+    } else {
+        cout << "Algorithm: Dijkstra-based FPS - 1) Pick arbitrary point -> 2) Find farthest -> 3) Discard arbitrary -> 4) Continue FPS" << endl;
+    }
 
     auto start = clock();
-    fps_samples = mesh->farthestPointSampling(numSamples);
-    auto end = clock();
-
-    double elapsed = double(end - start) / CLOCKS_PER_SEC;
+    if (algorithm_choice == 1) {
+        fps_samples = mesh->farthestPointSamplingLibIGL(numSamples);
+    } else {
+        fps_samples = mesh->farthestPointSampling(numSamples);
+    }
+    auto end = clock();    double elapsed = double(end - start) / CLOCKS_PER_SEC;
     if (fps_samples.size() == numSamples) {
         cout << "SUCCESS: FPS computed successfully!" << endl;
+        cout << "  Implementation: " << (algorithm_choice == 1 ? "LibIGL Heat Geodesics" : "Dijkstra") << endl;
         cout << "  Computation time: " << elapsed << " seconds" << endl;
         cout << "  Sample points: ";
         for (int sample : fps_samples) {
@@ -167,17 +165,8 @@ void VisualizationUtils::testPairwiseHarmonics(
     if (!mesh || !harmonics) {
         cout << "Error: Please load a mesh first!" << endl;
         return;
-    }
-
-    cout << "\n=== TESTING PAIRWISE HARMONICS ===" << endl;
-
-    cout << "Choose implementation:" << endl;
-    cout << "1. libigl-based (recommended - more robust)" << endl;
-    cout << "2. Custom implementation (original)" << endl;
-    cout << "Enter choice (1 or 2): ";
-
-    int implementation_choice;
-    cin >> implementation_choice;
+    }    cout << "\n=== TESTING PAIRWISE HARMONICS ===" << endl;
+    cout << "Using LibIGL implementation (robust, industry-standard)" << endl;
 
     int p_idx, q_idx;
     cout << "Enter first vertex index (p, boundary value 0): ";
@@ -194,22 +183,15 @@ void VisualizationUtils::testPairwiseHarmonics(
     cout << "Computing harmonic field between vertices " << p_idx << " and " << q_idx << "..." << endl;
 
     auto start = clock();
-    Eigen::VectorXd harmonicField;
-
-    if (implementation_choice == 1) {
-        cout << "Using libigl implementation..." << endl;
-        harmonicField = harmonics->computePairwiseHarmonicLibIGL(p_idx, q_idx);
-    } else {
-        cout << "Using custom implementation..." << endl;
-        harmonicField = harmonics->computePairwiseHarmonic(p_idx, q_idx);
-    }
+    cout << "Using libigl implementation..." << endl;
+    Eigen::VectorXd harmonicField = harmonics->computePairwiseHarmonicLibIGL(p_idx, q_idx);
 
     auto end = clock();
     double elapsed = double(end - start) / CLOCKS_PER_SEC;
 
     if (harmonicField.size() == nVerts) {
         cout << "SUCCESS: Pairwise harmonic computed successfully!" << endl;
-        cout << "  Implementation: " << (implementation_choice == 1 ? "libigl" : "custom") << endl;
+        cout << "  Implementation: libigl" << endl;
         cout << "  Computation time: " << elapsed << " seconds" << endl;
         cout << "  Field range: [" << harmonicField.minCoeff() << ", " << harmonicField.maxCoeff() << "]" << endl;
 
@@ -260,12 +242,10 @@ void VisualizationUtils::testIsoCurveExtraction(
     if (harmonicField.size() != mesh->verts.size()) {
         cout << "[ERROR] Failed to compute harmonic field!" << endl;
         return;
-    }
-
-    cout << "Extracting iso-curves at different levels..." << endl;
+    }    cout << "Extracting iso-curves at different levels..." << endl;
 
     clearVisualization(root);
-    vector<double> isoValues = {0.2, 0.4, 0.6, 0.8};
+    vector<double> isoValues = {0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 0.95}; // Increased from 4 to 8 levels
     vector<Eigen::Vector3d> skeletal_nodes;
 
     for (int i = 0; i < isoValues.size(); i++) {

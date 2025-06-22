@@ -49,10 +49,20 @@ bool PairwiseHarmonics::initializeLibIGL() {
         return false;
     }
 
+    // Check if mesh already has LibIGL data (preferred)
+    if (mesh->getVertexMatrix().rows() > 0 && mesh->getFaceMatrix().rows() > 0) {
+        cout << "Using mesh's existing LibIGL data..." << endl;
+        V = mesh->getVertexMatrix();
+        F = mesh->getFaceMatrix();
+        meshDataComputed = true;
+        return true;
+    }
+
+    // Fallback: Convert mesh data to LibIGL format
+    cout << "Converting mesh data to LibIGL format..." << endl;
     int nVerts = mesh->verts.size();
     int nFaces = mesh->tris.size();
 
-    // Convert mesh to LibIGL format
     V.resize(nVerts, 3);
     F.resize(nFaces, 3);
 

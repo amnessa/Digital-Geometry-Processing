@@ -96,10 +96,8 @@ public:
         PairwiseHarmonics* harmonics,
         const std::vector<int>& fps_samples,
         SoSeparator* root,
-        SoWinExaminerViewer* viewer
-    );
+        SoWinExaminerViewer* viewer    );
 
-private:
     /**
      * Create a colored sphere for visualization
      * @param position The 3D position
@@ -126,4 +124,6 @@ private:
         SoSeparator* root,
         const std::string& title
     );
+
+private:
 };

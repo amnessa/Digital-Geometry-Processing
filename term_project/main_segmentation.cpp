@@ -86,6 +86,8 @@ void testEnhancedFPS();
 void compareGeodesicMethods();
 void testEnhancedDescriptors();
 void testMeshAnalysis();
+void visualizeMeshSegmentationClusters();
+void visualizeSkeletalKMeansClustering();
 
 /**
  * Load a mesh file and initialize the segmentation system
@@ -124,23 +126,19 @@ void loadMesh() {
     cout << "Mesh loaded successfully!" << endl;
     cout << "  Vertices: " << g_mesh->verts.size() << endl;
     cout << "  Triangles: " << g_mesh->tris.size() << endl;
-    cout << "  Edges: " << g_mesh->edges.size() << endl;
-
-    // Convert mesh to LibIGL format for enhanced processing
+    cout << "  Edges: " << g_mesh->edges.size() << endl;    // Convert mesh to LibIGL format for enhanced processing
     cout << "\nConverting mesh to LibIGL format..." << endl;
     g_mesh->convertToLibIGL();
 
-    // Add mesh to visualization
-    g_root->addChild(g_painter->getShapeSep(g_mesh));// Initialize pairwise harmonics system
+    // Initialize pairwise harmonics system AFTER mesh conversion
     g_harmonics = new PairwiseHarmonics(g_mesh);
 
     // Initialize LibIGL for robust geometry processing
-    cout << "\nInitializing LibIGL for robust computations..." << endl;
+    cout << "Initializing LibIGL for robust computations..." << endl;
     if (g_harmonics->initializeLibIGL()) {
         cout << "LibIGL initialization successful!" << endl;
 
-        // Precompute heat geodesics for fast distance computation
-        cout << "Precomputing heat geodesics for enhanced performance..." << endl;
+        // Precompute heat geodesics for fast distance computation        cout << "Precomputing heat geodesics for enhanced performance..." << endl;
         if (g_mesh->precomputeHeatGeodesics()) {
             cout << "Heat geodesics precomputation successful!" << endl;
             cout << "  Fast geodesic distance computation is now available" << endl;
@@ -151,6 +149,11 @@ void loadMesh() {
     } else {
         cout << "Warning: LibIGL initialization failed. Some features may not work optimally." << endl;
     }
+
+    // Add mesh to visualization
+    g_root->addChild(g_painter->getShapeSep(g_mesh));
+
+    cout << "Mesh ready for pairwise harmonics analysis with LibIGL support!" << endl;
 
     // Clear segmentation state
     g_fps_samples.clear();
@@ -285,14 +288,15 @@ void showMainMenu() {
     cout << "2. Test Cotangent Laplacian" << endl;
     cout << "3. Test Farthest Point Sampling" << endl;
     cout << "4. Test Pairwise Harmonics" << endl;
-    cout << "5. Test Iso-curve Extraction" << endl;
-    cout << "6. Test Rigidity Analysis" << endl;
+    cout << "5. Test Iso-curve Extraction" << endl;    cout << "6. Test Rigidity Analysis" << endl;
     cout << "7. Perform Full Segmentation" << endl;
     cout << "8. Clear Visualization" << endl;    cout << "--- ENHANCED ANALYSIS ---" << endl;
     cout << "9. Improved Iso-curve Extraction (Dense Bracelets)" << endl;
     cout << "10. Enhanced Rigidity Analysis (All Nodes)" << endl;
     cout << "11. Visualize All Rigidity Points (Color-coded)" << endl;
-    cout << "12. Interactive Rigidity Threshold Testing" << endl;
+    cout << "12. Interactive Rigidity Threshold Testing" << endl;    cout << "--- SEGMENTATION VISUALIZATION ---" << endl;
+    cout << "18. Visualize Mesh Components (Colored Vertex Clusters)" << endl;
+    cout << "19. Skeletal K-means Clustering (Euclidean Distance)" << endl;
     cout << "--- LIBIGL ENHANCED FEATURES ---" << endl;
     cout << "13. Test Heat Geodesics (LibIGL)" << endl;
     cout << "14. Enhanced FPS with Heat Geodesics" << endl;
@@ -359,12 +363,17 @@ DWORD WINAPI ConsoleInputThread(LPVOID lpParam) {
                 break;
             case 15:
                 compareGeodesicMethods();
-                break;
-            case 16:
+                break;            case 16:
                 testEnhancedDescriptors();
                 break;
             case 17:
                 testMeshAnalysis();
+                break;
+            case 18:
+                visualizeMeshSegmentationClusters();
+                break;
+            case 19:
+                visualizeSkeletalKMeansClustering();
                 break;
             case 0:
                 cout << "Exiting..." << endl;
@@ -447,6 +456,25 @@ int main(int argc, char* argv[]) {
 // - interactiveRigidityThresholdTesting() -> RigidityAnalysis::interactiveRigidityThresholdTesting()
 // - extractIsocurvesTriangleMarching() -> IsocurveAnalysis::extractIsocurvesTriangleMarching()
 
+// ===================================================================
+// SEGMENTATION CONCEPTS EXPLAINED:
+// ===================================================================
+// 1. MESH COMPONENTS: These are the final segmentation results - groups of vertices
+//    that belong to the same "part" of the mesh (e.g., arm, leg, torso).
+//    ✓ These are what you want to visualize with different colors!
+//
+// 2. SKELETAL SEGMENTS: These represent the "bones" or medial axis segments
+//    that form the shape's internal skeleton structure.
+//    → Used for analysis but NOT the final segmentation output
+//
+// 3. SKELETON NODES: Points along the skeleton representing junctions
+//    or important anatomical landmarks.
+//    → Used for skeleton construction and refinement
+//
+// The correct visualization shows mesh components (option 18), where each
+// color represents vertices belonging to the same segmented part of the mesh.
+// ===================================================================
+
 /**
  * Test LibIGL heat geodesics functionality
  */
@@ -463,16 +491,32 @@ void testHeatGeodesics() {
     int numVertices = g_mesh->verts.size();
     vector<int> testVertices = {0, numVertices/4, numVertices/2, 3*numVertices/4};
 
+    clearVisualization();
+
     for (int v : testVertices) {
         if (v >= numVertices) continue;
 
         cout << "Testing heat geodesics from vertex " << v << "..." << endl;
         Eigen::VectorXd heatDist = g_harmonics->computeHeatGeodesicDistances(v);
+        cout << "Computed heat geodesic distances from vertex " << v << " (range: " << heatDist.minCoeff() << " to " << heatDist.maxCoeff() << ")" << endl;
         cout << "  Heat geodesic computation successful (size: " << heatDist.size() << ")" << endl;
         cout << "  Max distance: " << heatDist.maxCoeff() << endl;
         cout << "  Min distance: " << heatDist.minCoeff() << endl;
+
+        // Visualize heat geodesic distances as scalar field
+        VisualizationUtils::visualizeScalarField(g_mesh, heatDist, g_root, "Heat Geodesic Distances from vertex " + to_string(v));
+
+        // Mark the source vertex with a special sphere
+        Eigen::Vector3d sourcePos(g_mesh->verts[v]->coords[0], g_mesh->verts[v]->coords[1], g_mesh->verts[v]->coords[2]);
+        Eigen::Vector3f sourceColor(1.0f, 1.0f, 0.0f); // Yellow for source
+        SoSeparator* sourceViz = VisualizationUtils::createColoredSphere(sourcePos, sourceColor, 0.02f);
+        g_root->addChild(sourceViz);
+
+        break; // Only visualize first one to avoid clutter
     }
 
+    g_viewer->scheduleRedraw();
+    g_viewer->viewAll();
     cout << "Heat geodesics test completed!" << endl;
 }
 
@@ -488,6 +532,8 @@ void testEnhancedFPS() {
     cout << "\n=== TESTING ENHANCED FPS ===" << endl;
     cout << "Testing Farthest Point Sampling with LibIGL heat geodesics" << endl;
 
+    clearVisualization();
+
     // Test with different numbers of samples
     vector<int> sampleCounts = {5, 10, 20, 30};
 
@@ -496,9 +542,10 @@ void testEnhancedFPS() {
 
         // Use the Mesh's FPS method directly
         vector<int> fps_samples = g_mesh->farthestPointSamplingLibIGL(count);
-        cout << "  FPS generated " << fps_samples.size() << " samples" << endl;
+        cout << "LibIGL-enhanced FPS completed: " << fps_samples.size() << " samples generated" << endl;
 
         if (!fps_samples.empty()) {
+            cout << "  FPS generated " << fps_samples.size() << " samples" << endl;
             cout << "  Sample vertices: ";
             for (size_t i = 0; i < min(size_t(5), fps_samples.size()); ++i) {
                 cout << fps_samples[i] << " ";
@@ -508,6 +555,31 @@ void testEnhancedFPS() {
         }
     }
 
+    // Visualize the last set of FPS samples
+    cout << "Visualizing FPS samples with " << sampleCounts.back() << " points..." << endl;
+    vector<int> fps_samples = g_mesh->farthestPointSamplingLibIGL(sampleCounts.back());
+
+    for (size_t i = 0; i < fps_samples.size(); i++) {
+        Eigen::Vector3d pos(g_mesh->verts[fps_samples[i]]->coords[0],
+                            g_mesh->verts[fps_samples[i]]->coords[1],
+                            g_mesh->verts[fps_samples[i]]->coords[2]);
+
+        // Color based on sampling order: first red, last blue, others green
+        Eigen::Vector3f color;
+        if (i == 0) {
+            color = Eigen::Vector3f(1.0f, 0.0f, 0.0f); // Red for first
+        } else if (i == fps_samples.size() - 1) {
+            color = Eigen::Vector3f(0.0f, 0.0f, 1.0f); // Blue for last
+        } else {
+            color = Eigen::Vector3f(0.0f, 1.0f, 0.0f); // Green for others
+        }
+
+        SoSeparator* pointViz = VisualizationUtils::createColoredSphere(pos, color, 0.015f);
+        g_root->addChild(pointViz);
+    }
+
+    g_viewer->scheduleRedraw();
+    g_viewer->viewAll();
     cout << "Enhanced FPS test completed!" << endl;
 }
 
@@ -521,25 +593,62 @@ void compareGeodesicMethods() {
     }
 
     cout << "\n=== COMPARING GEODESIC METHODS ===" << endl;
-    cout << "Comparing LibIGL heat geodesics with other methods" << endl;
+    cout << "Comparing LibIGL heat geodesics with Dijkstra-based geodesics" << endl;
 
     int sourceVertex = 0;
     int numVertices = g_mesh->verts.size();
 
     if (numVertices > 0) {
+        cout << "Method 1: LibIGL Heat Geodesics" << endl;
         cout << "Computing heat geodesics from vertex " << sourceVertex << "..." << endl;
 
-        auto start = chrono::high_resolution_clock::now();
+        auto start1 = chrono::high_resolution_clock::now();
         Eigen::VectorXd heatDist = g_harmonics->computeHeatGeodesicDistances(sourceVertex);
-        auto end = chrono::high_resolution_clock::now();
+        auto end1 = chrono::high_resolution_clock::now();
 
-        auto duration = chrono::duration_cast<chrono::milliseconds>(end - start);
-        cout << "Heat geodesics computed in " << duration.count() << " ms" << endl;
+        auto duration1 = chrono::duration_cast<chrono::milliseconds>(end1 - start1);
+        cout << "Heat geodesics computed in " << duration1.count() << " ms" << endl;
         cout << "Result statistics:" << endl;
         cout << "  Size: " << heatDist.size() << endl;
         cout << "  Max distance: " << heatDist.maxCoeff() << endl;
         cout << "  Min distance: " << heatDist.minCoeff() << endl;
-        cout << "  Mean distance: " << heatDist.mean() << endl;
+        cout << "  Mean distance: " << heatDist.mean() << endl;        cout << "\nMethod 2: Dijkstra-based Geodesics" << endl;
+        cout << "Computing Dijkstra geodesics from vertex " << sourceVertex << "..." << endl;
+
+        auto start2 = chrono::high_resolution_clock::now();
+        int N;
+        float* dijkstraDistPtr = g_mesh->computeGeodesicDistances(sourceVertex, N);
+        auto end2 = chrono::high_resolution_clock::now();
+
+        auto duration2 = chrono::duration_cast<chrono::milliseconds>(end2 - start2);
+        cout << "Dijkstra geodesics computed in " << duration2.count() << " ms" << endl;
+
+        if (dijkstraDistPtr && N > 0) {
+            // Convert to vector for easier handling
+            vector<double> dijkstraDist(dijkstraDistPtr, dijkstraDistPtr + N);
+
+            double maxDijkstra = *max_element(dijkstraDist.begin(), dijkstraDist.end());
+            double minDijkstra = *min_element(dijkstraDist.begin(), dijkstraDist.end());
+            double meanDijkstra = 0;
+            for (double d : dijkstraDist) meanDijkstra += d;
+            meanDijkstra /= dijkstraDist.size();
+
+            cout << "Result statistics:" << endl;
+            cout << "  Size: " << dijkstraDist.size() << endl;
+            cout << "  Max distance: " << maxDijkstra << endl;
+            cout << "  Min distance: " << minDijkstra << endl;
+            cout << "  Mean distance: " << meanDijkstra << endl;
+
+            cout << "\nComparison Summary:" << endl;
+            cout << "  Heat geodesics time: " << duration1.count() << " ms" << endl;
+            cout << "  Dijkstra time: " << duration2.count() << " ms" << endl;
+            cout << "  Speed improvement: " << (double(duration2.count()) / duration1.count()) << "x faster" << endl;
+
+            // Clean up the allocated memory
+            delete[] dijkstraDistPtr;
+        } else {
+            cout << "Dijkstra geodesics computation failed!" << endl;
+        }
     }
 
     cout << "Geodesic methods comparison completed!" << endl;
@@ -555,7 +664,9 @@ void testEnhancedDescriptors() {
     }
 
     cout << "\n=== TESTING ENHANCED DESCRIPTORS ===" << endl;
-    cout << "Testing LibIGL-based R and D descriptors" << endl;
+    cout << "Testing LibIGL-based R and D descriptors for shape analysis" << endl;
+    cout << "R Descriptor: Measures isocurve lengths (shape profile)" << endl;
+    cout << "D Descriptor: Measures distance variations (shape complexity)" << endl;
 
     int numVertices = g_mesh->verts.size();
     if (numVertices < 2) {
@@ -575,14 +686,29 @@ void testEnhancedDescriptors() {
         cout << "Harmonic field computed successfully (size: " << field.size() << ")" << endl;
 
         // Test R descriptor
-        cout << "Computing R descriptor..." << endl;
+        cout << "Computing R descriptor (isocurve length measurements)..." << endl;
         Eigen::VectorXd rDesc = g_harmonics->computeRDescriptorLibIGL(field, DEFAULT_K);
-        cout << "R descriptor size: " << rDesc.size() << endl;
+        cout << "R descriptor computed successfully (size: " << rDesc.size() << ")" << endl;
+        cout << "R descriptor values (first 10): ";
+        for (int i = 0; i < min(10, (int)rDesc.size()); i++) {
+            cout << rDesc(i) << " ";
+        }
+        cout << endl;
 
         // Test D descriptor
-        cout << "Computing D descriptor..." << endl;
+        cout << "Computing D descriptor (distance variation measurements)..." << endl;
         Eigen::VectorXd dDesc = g_harmonics->computeDDescriptorLibIGL(p, q, field, DEFAULT_K);
-        cout << "D descriptor size: " << dDesc.size() << endl;
+        cout << "D descriptor computed successfully (size: " << dDesc.size() << ")" << endl;
+        cout << "D descriptor values (first 10): ";
+        for (int i = 0; i < min(10, (int)dDesc.size()); i++) {
+            cout << dDesc(i) << " ";
+        }
+        cout << endl;
+
+        cout << "\nDescriptor Applications:" << endl;
+        cout << "  R Descriptor: Used for shape matching and symmetry detection" << endl;
+        cout << "  D Descriptor: Used for mesh segmentation and part identification" << endl;
+        cout << "  Both descriptors feed into the segmentation algorithm in Section 3.3" << endl;
     } else {
         cout << "Error: Failed to compute harmonic field!" << endl;
     }
@@ -632,4 +758,293 @@ void testMeshAnalysis() {
     cout << "Comprehensive mesh analysis completed!" << endl;
 }
 
-// End of file
+/**
+ * Visualize mesh segmentation by coloring vertices according to their mesh components
+ * Each vertex is colored based on which mesh component (segmented part) it belongs to
+ */
+void visualizeMeshSegmentationClusters() {
+    if (!g_segmentation_result.success || g_segmentation_result.meshComponents.empty() || !g_mesh) {
+        cout << "Error: Please run full segmentation first to generate mesh components!" << endl;
+        cout << "Use option 1 to perform complete segmentation." << endl;
+        return;
+    }
+
+    cout << "\n=== MESH COMPONENT VISUALIZATION ===" << endl;
+    cout << "Showing " << g_segmentation_result.meshComponents.size() << " mesh components with colored vertices" << endl;
+
+    clearVisualization();
+
+    // Define colors for different mesh components
+    vector<Eigen::Vector3f> componentColors = {
+        Eigen::Vector3f(1.0f, 0.0f, 0.0f), // Red
+        Eigen::Vector3f(0.0f, 1.0f, 0.0f), // Green
+        Eigen::Vector3f(0.0f, 0.0f, 1.0f), // Blue
+        Eigen::Vector3f(1.0f, 1.0f, 0.0f), // Yellow
+        Eigen::Vector3f(1.0f, 0.0f, 1.0f), // Magenta
+        Eigen::Vector3f(0.0f, 1.0f, 1.0f), // Cyan
+        Eigen::Vector3f(1.0f, 0.5f, 0.0f), // Orange
+        Eigen::Vector3f(0.5f, 0.0f, 1.0f), // Purple
+        Eigen::Vector3f(0.5f, 1.0f, 0.5f), // Light Green
+        Eigen::Vector3f(1.0f, 0.5f, 0.5f)  // Light Red
+    };
+
+    // Create a mapping from vertex index to component index
+    vector<int> vertexToComponent(g_mesh->verts.size(), -1);
+
+    for (int compIdx = 0; compIdx < g_segmentation_result.meshComponents.size(); compIdx++) {
+        const auto& component = g_segmentation_result.meshComponents[compIdx];
+        for (int vertexIdx : component.vertexIndices) {
+            if (vertexIdx >= 0 && vertexIdx < g_mesh->verts.size()) {
+                vertexToComponent[vertexIdx] = compIdx;
+            }
+        }    }
+
+    // Visualize vertices colored by their mesh component assignment
+    cout << "Rendering colored spheres for each mesh component..." << endl;
+
+    for (int compIdx = 0; compIdx < g_segmentation_result.meshComponents.size(); compIdx++) {
+        const auto& component = g_segmentation_result.meshComponents[compIdx];
+        Eigen::Vector3f color = componentColors[compIdx % componentColors.size()];
+
+        cout << "  Component " << compIdx << ": " << component.vertexIndices.size() << " vertices, color: ("
+             << color[0] << ", " << color[1] << ", " << color[2] << ")" << endl;
+
+        // Visualize vertices in this component (downsample for performance)
+        for (int i = 0; i < component.vertexIndices.size(); i += 15) { // Every 15th vertex
+            int vertexIdx = component.vertexIndices[i];
+            if (vertexIdx >= 0 && vertexIdx < g_mesh->verts.size()) {
+                Eigen::Vector3d vertexPos(g_mesh->verts[vertexIdx]->coords[0],
+                                         g_mesh->verts[vertexIdx]->coords[1],
+                                         g_mesh->verts[vertexIdx]->coords[2]);
+
+                SoSeparator* pointViz = VisualizationUtils::createColoredSphere(vertexPos, color, 0.008f);
+                g_root->addChild(pointViz);
+            }
+        }
+
+        // Also show the component center as a larger sphere
+        SoSeparator* centerViz = VisualizationUtils::createColoredSphere(component.center, color, 0.02f);
+        g_root->addChild(centerViz);
+    }
+
+    // Also visualize the partial skeleton as lines
+    if (!g_segmentation_result.partialSkeleton.empty()) {
+        cout << "Rendering partial skeleton..." << endl;
+        for (int s = 0; s < g_segmentation_result.partialSkeleton.size(); s++) {
+            const auto& segment = g_segmentation_result.partialSkeleton[s];
+            if (segment.nodes.size() < 2) continue;
+
+            // Use white/gray for skeleton
+            Eigen::Vector3f skeletonColor(0.8f, 0.8f, 0.8f);
+
+            SoSeparator* lineSep = new SoSeparator();
+            SoMaterial* mat = new SoMaterial();
+            mat->diffuseColor.setValue(skeletonColor[0], skeletonColor[1], skeletonColor[2]);
+            mat->emissiveColor.setValue(skeletonColor[0] * 0.5f, skeletonColor[1] * 0.5f, skeletonColor[2] * 0.5f);
+            lineSep->addChild(mat);
+
+            SoCoordinate3* coords = new SoCoordinate3();
+            coords->point.setNum(segment.nodes.size());
+
+            for (int i = 0; i < segment.nodes.size(); i++) {
+                coords->point.set1Value(i, segment.nodes[i][0], segment.nodes[i][1], segment.nodes[i][2]);
+            }
+            lineSep->addChild(coords);
+
+            SoIndexedLineSet* lineSet = new SoIndexedLineSet();
+            for (int i = 0; i < segment.nodes.size() - 1; i++) {
+                lineSet->coordIndex.set1Value(i * 3, i);
+                lineSet->coordIndex.set1Value(i * 3 + 1, i + 1);
+                lineSet->coordIndex.set1Value(i * 3 + 2, -1);
+            }
+            lineSep->addChild(lineSet);
+            g_root->addChild(lineSep);
+        }
+    }
+
+    g_viewer->scheduleRedraw();
+    g_viewer->viewAll();
+
+    cout << "\n=== MESH COMPONENT VISUALIZATION COMPLETE ===" << endl;
+    cout << "✓ Displayed " << g_segmentation_result.meshComponents.size() << " mesh components with unique colors" << endl;
+    cout << "✓ Each colored sphere represents a vertex in that component" << endl;
+    cout << "✓ Large spheres show component centers" << endl;
+    cout << "✓ Gray lines show the partial skeleton structure" << endl;
+}
+
+/**
+ * Visualize mesh segmentation using skeletal-based K-means clustering
+ * Generate points along skeletal segments as centroids, then cluster vertices by Euclidean distance
+ */
+void visualizeSkeletalKMeansClustering() {
+    if (!g_segmentation_result.success || g_segmentation_result.partialSkeleton.empty() || !g_mesh) {
+        cout << "Error: Please run full segmentation first to generate skeletal segments!" << endl;
+        cout << "Use option 7 to perform complete segmentation." << endl;
+        return;
+    }
+
+    cout << "\n=== SKELETAL K-MEANS CLUSTERING ===" << endl;
+    cout << "Using " << g_segmentation_result.partialSkeleton.size() << " skeletal segments as cluster centroids" << endl;
+
+    clearVisualization();
+
+    // Define colors for different clusters
+    vector<Eigen::Vector3f> clusterColors = {
+        Eigen::Vector3f(1.0f, 0.0f, 0.0f), // Red
+        Eigen::Vector3f(0.0f, 1.0f, 0.0f), // Green
+        Eigen::Vector3f(0.0f, 0.0f, 1.0f), // Blue
+        Eigen::Vector3f(1.0f, 1.0f, 0.0f), // Yellow
+        Eigen::Vector3f(1.0f, 0.0f, 1.0f), // Magenta
+        Eigen::Vector3f(0.0f, 1.0f, 1.0f), // Cyan
+        Eigen::Vector3f(1.0f, 0.5f, 0.0f), // Orange
+        Eigen::Vector3f(0.5f, 0.0f, 1.0f), // Purple
+        Eigen::Vector3f(0.5f, 1.0f, 0.5f), // Light Green
+        Eigen::Vector3f(1.0f, 0.5f, 0.5f)  // Light Red
+    };
+
+    // Generate centroids along each skeletal segment
+    vector<vector<Eigen::Vector3d>> skeletalCentroids(g_segmentation_result.partialSkeleton.size());
+
+    for (int segIdx = 0; segIdx < g_segmentation_result.partialSkeleton.size(); segIdx++) {
+        const auto& segment = g_segmentation_result.partialSkeleton[segIdx];
+
+        if (segment.nodes.size() < 2) {
+            // If segment has only one node, use it as the single centroid
+            if (!segment.nodes.empty()) {
+                skeletalCentroids[segIdx].push_back(segment.nodes[0]);
+            }
+            continue;
+        }
+
+        // Generate points along the skeletal curve/line
+        int numCentroidsPerSegment = max(3, (int)segment.nodes.size() / 2); // At least 3 centroids per segment
+
+        for (int i = 0; i < numCentroidsPerSegment; i++) {
+            double t = (double)i / (numCentroidsPerSegment - 1); // Parameter from 0 to 1
+
+            // Find the position along the skeletal path at parameter t
+            double totalLength = 0.0;
+            for (int j = 0; j < segment.nodes.size() - 1; j++) {
+                totalLength += (segment.nodes[j+1] - segment.nodes[j]).norm();
+            }
+
+            double targetLength = t * totalLength;
+            double currentLength = 0.0;
+
+            for (int j = 0; j < segment.nodes.size() - 1; j++) {
+                double edgeLength = (segment.nodes[j+1] - segment.nodes[j]).norm();
+
+                if (currentLength + edgeLength >= targetLength) {
+                    // Interpolate between nodes j and j+1
+                    double alpha = (targetLength - currentLength) / edgeLength;
+                    Eigen::Vector3d interpolatedPoint = segment.nodes[j] + alpha * (segment.nodes[j+1] - segment.nodes[j]);
+                    skeletalCentroids[segIdx].push_back(interpolatedPoint);
+                    break;
+                }
+                currentLength += edgeLength;
+            }
+        }
+
+        cout << "  Segment " << segIdx << ": Generated " << skeletalCentroids[segIdx].size() << " centroids" << endl;
+    }
+
+    // Cluster each vertex to the closest skeletal centroid
+    vector<int> vertexClusters(g_mesh->verts.size());
+    vector<int> clusterSizes(g_segmentation_result.partialSkeleton.size(), 0);
+
+    for (int v = 0; v < g_mesh->verts.size(); v++) {
+        Eigen::Vector3d vertexPos(g_mesh->verts[v]->coords[0],
+                                 g_mesh->verts[v]->coords[1],
+                                 g_mesh->verts[v]->coords[2]);
+
+        double minDistance = 1e10;
+        int closestCluster = 0;
+
+        // Find the closest skeletal centroid across all segments
+        for (int segIdx = 0; segIdx < skeletalCentroids.size(); segIdx++) {
+            for (const auto& centroid : skeletalCentroids[segIdx]) {
+                double distance = (vertexPos - centroid).norm();
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    closestCluster = segIdx;
+                }
+            }
+        }
+
+        vertexClusters[v] = closestCluster;
+        clusterSizes[closestCluster]++;
+    }
+
+    // Print cluster statistics
+    cout << "Cluster sizes:" << endl;
+    for (int i = 0; i < clusterSizes.size(); i++) {
+        cout << "  Cluster " << i << ": " << clusterSizes[i] << " vertices" << endl;
+    }
+
+    // Visualize vertices colored by cluster
+    cout << "Rendering colored spheres for each cluster..." << endl;
+    for (int v = 0; v < g_mesh->verts.size(); v += 12) { // Downsample for performance
+        Eigen::Vector3d vertexPos(g_mesh->verts[v]->coords[0],
+                                 g_mesh->verts[v]->coords[1],
+                                 g_mesh->verts[v]->coords[2]);
+
+        int cluster = vertexClusters[v];
+        Eigen::Vector3f color = clusterColors[cluster % clusterColors.size()];
+
+        SoSeparator* pointViz = VisualizationUtils::createColoredSphere(vertexPos, color, 0.006f);
+        g_root->addChild(pointViz);
+    }
+
+    // Visualize the skeletal centroids as larger spheres
+    cout << "Rendering skeletal centroids..." << endl;
+    for (int segIdx = 0; segIdx < skeletalCentroids.size(); segIdx++) {
+        Eigen::Vector3f color = clusterColors[segIdx % clusterColors.size()];
+
+        for (const auto& centroid : skeletalCentroids[segIdx]) {
+            SoSeparator* centroidViz = VisualizationUtils::createColoredSphere(centroid, color, 0.015f);
+            g_root->addChild(centroidViz);
+        }
+    }
+
+    // Also visualize the original skeletal segments as lines
+    cout << "Rendering skeletal segments..." << endl;
+    for (int segIdx = 0; segIdx < g_segmentation_result.partialSkeleton.size(); segIdx++) {
+        const auto& segment = g_segmentation_result.partialSkeleton[segIdx];
+        if (segment.nodes.size() < 2) continue;
+
+        Eigen::Vector3f color = clusterColors[segIdx % clusterColors.size()];
+
+        SoSeparator* lineSep = new SoSeparator();
+        SoMaterial* mat = new SoMaterial();
+        mat->diffuseColor.setValue(color[0], color[1], color[2]);
+        mat->emissiveColor.setValue(color[0] * 0.3f, color[1] * 0.3f, color[2] * 0.3f);
+        lineSep->addChild(mat);
+
+        SoCoordinate3* coords = new SoCoordinate3();
+        coords->point.setNum(segment.nodes.size());
+
+        for (int i = 0; i < segment.nodes.size(); i++) {
+            coords->point.set1Value(i, segment.nodes[i][0], segment.nodes[i][1], segment.nodes[i][2]);
+        }
+        lineSep->addChild(coords);
+
+        SoIndexedLineSet* lineSet = new SoIndexedLineSet();
+        for (int i = 0; i < segment.nodes.size() - 1; i++) {
+            lineSet->coordIndex.set1Value(i * 3, i);
+            lineSet->coordIndex.set1Value(i * 3 + 1, i + 1);
+            lineSet->coordIndex.set1Value(i * 3 + 2, -1);
+        }
+        lineSep->addChild(lineSet);
+        g_root->addChild(lineSep);
+    }
+
+    g_viewer->scheduleRedraw();
+    g_viewer->viewAll();
+
+    cout << "\n=== SKELETAL K-MEANS CLUSTERING COMPLETE ===" << endl;
+    cout << "✓ Used " << g_segmentation_result.partialSkeleton.size() << " skeletal segments as cluster bases" << endl;
+    cout << "✓ Clustered vertices using Euclidean distance to skeletal centroids" << endl;
+    cout << "✓ Small spheres: vertices colored by cluster assignment" << endl;
+    cout << "✓ Large spheres: skeletal centroids used for clustering" << endl;
+    cout << "✓ Colored lines: original skeletal segments" << endl;
+}
