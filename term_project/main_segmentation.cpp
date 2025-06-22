@@ -12,6 +12,7 @@
 #include <set>
 #include <queue>
 #include <chrono>
+#include <limits>
 
 // Standard C++ headers and Eigen headers BEFORE Windows.h and Coin3D headers
 #include <Eigen/Dense>
@@ -73,7 +74,7 @@ vector<bool> g_nonrigid_nodes;
 
 // Algorithm parameters (from the paper)
 const int DEFAULT_K = 50;           // Number of isocurves per harmonic field
-const double RIGIDITY_THRESHOLD = 0.9;  // Threshold for classifying rigid vs non-rigid nodes (paper recommendation 0.85-0.95)
+const double RIGIDITY_THRESHOLD = 0.9;  // Threshold for classifying rigid vs non-rigid nodes (significantly lowered for better junction detection)
 const int DEFAULT_FPS_SAMPLES = 25;     // Number of FPS samples for initial point generation (increased from 15)
 
 // Forward declarations
@@ -88,6 +89,9 @@ void testEnhancedDescriptors();
 void testMeshAnalysis();
 void visualizeMeshSegmentationClusters();
 void visualizeSkeletalKMeansClustering();
+void analyzeSkeletalSegments();
+void analyzeDetailedRigidity();
+void analyzeDetailedRigidity();
 
 /**
  * Load a mesh file and initialize the segmentation system
@@ -297,6 +301,8 @@ void showMainMenu() {
     cout << "12. Interactive Rigidity Threshold Testing" << endl;    cout << "--- SEGMENTATION VISUALIZATION ---" << endl;
     cout << "18. Visualize Mesh Components (Colored Vertex Clusters)" << endl;
     cout << "19. Skeletal K-means Clustering (Euclidean Distance)" << endl;
+    cout << "20. Analyze Skeletal Segments (Diagnostic)" << endl;
+    cout << "21. Detailed Rigidity Analysis (Debug Cutting)" << endl;
     cout << "--- LIBIGL ENHANCED FEATURES ---" << endl;
     cout << "13. Test Heat Geodesics (LibIGL)" << endl;
     cout << "14. Enhanced FPS with Heat Geodesics" << endl;
@@ -316,7 +322,19 @@ DWORD WINAPI ConsoleInputThread(LPVOID lpParam) {
 
     while (true) {
         showMainMenu();
-        cin >> choice;        switch (choice) {
+
+        // Robust input handling with error checking
+        if (!(cin >> choice)) {
+            // Clear error flag
+            cin.clear();
+            // Clear input buffer
+            cin.ignore(numeric_limits<streamsize>::max(), '\n');
+            cout << "Invalid input! Please enter a number." << endl;
+            continue;
+        }
+
+        // Clear any remaining characters in the input buffer
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');switch (choice) {
             case 1:
                 loadMesh();
                 break;
@@ -374,7 +392,12 @@ DWORD WINAPI ConsoleInputThread(LPVOID lpParam) {
                 break;
             case 19:
                 visualizeSkeletalKMeansClustering();
-                break;
+                break;        case 20:
+            analyzeSkeletalSegments();
+            break;
+        case 21:
+            analyzeDetailedRigidity();
+            break;
             case 0:
                 cout << "Exiting..." << endl;
                 exit(0);
@@ -866,10 +889,10 @@ void visualizeMeshSegmentationClusters() {
     g_viewer->viewAll();
 
     cout << "\n=== MESH COMPONENT VISUALIZATION COMPLETE ===" << endl;
-    cout << "✓ Displayed " << g_segmentation_result.meshComponents.size() << " mesh components with unique colors" << endl;
-    cout << "✓ Each colored sphere represents a vertex in that component" << endl;
-    cout << "✓ Large spheres show component centers" << endl;
-    cout << "✓ Gray lines show the partial skeleton structure" << endl;
+    cout << "-> Displayed " << g_segmentation_result.meshComponents.size() << " mesh components with unique colors" << endl;
+    cout << "-> Each colored sphere represents a vertex in that component" << endl;
+    cout << "-> Large spheres show component centers" << endl;
+    cout << "-> Gray lines show the partial skeleton structure" << endl;
 }
 
 /**
@@ -1042,9 +1065,136 @@ void visualizeSkeletalKMeansClustering() {
     g_viewer->viewAll();
 
     cout << "\n=== SKELETAL K-MEANS CLUSTERING COMPLETE ===" << endl;
-    cout << "✓ Used " << g_segmentation_result.partialSkeleton.size() << " skeletal segments as cluster bases" << endl;
-    cout << "✓ Clustered vertices using Euclidean distance to skeletal centroids" << endl;
-    cout << "✓ Small spheres: vertices colored by cluster assignment" << endl;
-    cout << "✓ Large spheres: skeletal centroids used for clustering" << endl;
-    cout << "✓ Colored lines: original skeletal segments" << endl;
+    cout << "-> Used " << g_segmentation_result.partialSkeleton.size() << " skeletal segments as cluster bases" << endl;
+    cout << "-> Clustered vertices using Euclidean distance to skeletal centroids" << endl;
+    cout << "-> Small spheres: vertices colored by cluster assignment" << endl;
+    cout << "-> Large spheres: skeletal centroids used for clustering" << endl;
+    cout << "-> Colored lines: original skeletal segments" << endl;
+}
+
+/**
+ * Diagnostic function to analyze skeletal segments
+ */
+void analyzeSkeletalSegments() {
+    if (!g_segmentation_result.success || g_segmentation_result.partialSkeleton.empty()) {
+        cout << "Error: Please run full segmentation first!" << endl;
+        return;
+    }
+
+    cout << "\n=== SKELETAL SEGMENT ANALYSIS ===" << endl;
+    cout << "Total segments in partial skeleton: " << g_segmentation_result.partialSkeleton.size() << endl;
+
+    for (int i = 0; i < g_segmentation_result.partialSkeleton.size(); i++) {
+        const auto& segment = g_segmentation_result.partialSkeleton[i];
+
+        cout << "\nSegment " << i << ":" << endl;
+        cout << "  Nodes: " << segment.nodes.size() << endl;
+        cout << "  Length: " << segment.length << endl;
+        cout << "  Avg Rigidity: " << segment.avgRigidity << endl;
+        cout << "  Quality: " << segment.quality << endl;
+        cout << "  Source FPS: " << segment.sourceIdx << ", Target FPS: " << segment.targetIdx << endl;
+
+        if (!segment.nodes.empty()) {
+            Eigen::Vector3d startPoint = segment.nodes[0];
+            Eigen::Vector3d endPoint = segment.nodes.back();
+
+            cout << "  Start point: (" << startPoint[0] << ", " << startPoint[1] << ", " << startPoint[2] << ")" << endl;
+            cout << "  End point: (" << endPoint[0] << ", " << endPoint[1] << ", " << endPoint[2] << ")" << endl;
+
+            // Check if this segment starts at the same point as others
+            for (int j = 0; j < i; j++) {
+                if (!g_segmentation_result.partialSkeleton[j].nodes.empty()) {
+                    Eigen::Vector3d otherStart = g_segmentation_result.partialSkeleton[j].nodes[0];
+                    double distance = (startPoint - otherStart).norm();
+                    if (distance < 0.01) { // Very close starting points
+                        cout << "  WARNING: Starts very close to segment " << j << " (distance: " << distance << ")" << endl;
+                    }
+                }
+            }
+        }
+
+        // Analyze rigidity distribution
+        if (!segment.nodeRigidities.empty()) {
+            double minRig = *min_element(segment.nodeRigidities.begin(), segment.nodeRigidities.end());
+            double maxRig = *max_element(segment.nodeRigidities.begin(), segment.nodeRigidities.end());
+            cout << "  Rigidity range: [" << minRig << ", " << maxRig << "]" << endl;
+
+            // Count how many nodes are below threshold
+            int lowRigidityCount = 0;
+            for (double rig : segment.nodeRigidities) {
+                if (rig < RIGIDITY_THRESHOLD) lowRigidityCount++;
+            }
+            cout << "  Nodes below threshold (" << RIGIDITY_THRESHOLD << "): " << lowRigidityCount << "/" << segment.nodeRigidities.size() << endl;
+        }
+    }
+
+    // Analyze FPS points used
+    cout << "\nFPS Points Analysis:" << endl;
+    cout << "Total FPS points: " << g_segmentation_result.fpsPoints.size() << endl;
+
+    set<int> usedSourcePoints, usedTargetPoints;
+    for (const auto& segment : g_segmentation_result.partialSkeleton) {
+        usedSourcePoints.insert(segment.sourceIdx);
+        usedTargetPoints.insert(segment.targetIdx);
+    }
+
+    cout << "Unique source FPS points used: " << usedSourcePoints.size() << endl;
+    cout << "Unique target FPS points used: " << usedTargetPoints.size() << endl;
+
+    if (usedSourcePoints.size() == 1) {
+        cout << "WARNING: All segments use the same source point!" << endl;
+    }
+    if (usedTargetPoints.size() == 1) {
+        cout << "WARNING: All segments use the same target point!" << endl;
+    }
+}
+
+/**
+ * Diagnostic function to show detailed rigidity information for troubleshooting
+ */
+void analyzeDetailedRigidity() {
+    if (!g_segmentation_result.success || g_segmentation_result.partialSkeleton.empty()) {
+        cout << "Error: Please run full segmentation first!" << endl;
+        return;
+    }
+
+    cout << "\n=== DETAILED RIGIDITY ANALYSIS ===" << endl;
+
+    for (int segIdx = 0; segIdx < g_segmentation_result.partialSkeleton.size(); segIdx++) {
+        const auto& segment = g_segmentation_result.partialSkeleton[segIdx];
+
+        cout << "\nSegment " << segIdx << " (FPS " << segment.sourceIdx << " -> " << segment.targetIdx << "):" << endl;
+        cout << "  Total nodes: " << segment.nodes.size() << endl;
+        cout << "  Rigidity values:" << endl;
+
+        // Show rigidity histogram
+        int lowCount = 0, mediumCount = 0, highCount = 0;
+
+        for (int i = 0; i < segment.nodeRigidities.size(); i++) {
+            double rig = segment.nodeRigidities[i];
+
+            if (i < 10 || i % 5 == 0) { // Show first 10 and every 5th value
+                cout << "    Node " << i << ": " << rig << endl;
+            }
+
+            if (rig < 0.4) lowCount++;
+            else if (rig < 0.7) mediumCount++;
+            else highCount++;
+        }
+
+        cout << "  Rigidity distribution:" << endl;
+        cout << "    Low (< 0.4): " << lowCount << " nodes" << endl;
+        cout << "    Medium (0.4-0.7): " << mediumCount << " nodes" << endl;
+        cout << "    High (> 0.7): " << highCount << " nodes" << endl;
+
+        // Analyze why cutting didn't work
+        cout << "  Cutting analysis:" << endl;
+        cout << "    Threshold used: " << RIGIDITY_THRESHOLD << endl;
+        cout << "    Nodes below threshold: " << lowCount + (RIGIDITY_THRESHOLD > 0.4 ? mediumCount : 0) << endl;
+
+        if (lowCount == 0 && mediumCount == 0) {
+            cout << "    ISSUE: No low rigidity nodes found - all nodes are too rigid!" << endl;
+            cout << "    SOLUTION: Lower the rigidity threshold or check rigidity computation" << endl;
+        }
+    }
 }

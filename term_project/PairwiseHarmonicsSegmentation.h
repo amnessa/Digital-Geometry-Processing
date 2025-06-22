@@ -16,15 +16,15 @@ class Painter;
  * by Zheng et al., IEEE TVCG 2013
  */
 class PairwiseHarmonicsSegmentation {
-public:
-    struct SegmentationParams {
+public:    struct SegmentationParams {
         int numFPSSamples = 25;           // Number of FPS samples
         int numIsocurves = 50;            // K: number of isocurves per harmonic field
-        double rigidityThreshold = 0.9;   // Threshold for rigidity classification
+        double rigidityThreshold = 0.8;   // Threshold for high-rigidity classification (limb centers)
         double isoTolerance = 0.03;       // Tolerance for isocurve bracelet thickness
         double minSegmentLength = 0.3;    // Minimum segment length (relative to endpoint distance)
-        int minSkeletalNodes = 5;         // Minimum nodes for valid skeletal segment
-        int maxSkeletonSegments = 8;      // Maximum segments in partial skeleton
+        int minSkeletalNodes = 4;         // Minimum nodes for valid skeletal segment
+        int maxSkeletonSegments = 10;      // Maximum segments in partial skeleton
+        double junctionThreshold = 0.6;  // Threshold for anatomical junctions (body connections)
     };
 
     struct SkeletalSegment {
@@ -40,9 +40,7 @@ public:
         std::vector<int> vertexIndices;       // Vertices in this component
         Eigen::Vector3d center;               // Geometric center
         int skeletonSegmentId;                // Associated skeleton segment (-1 if none)
-    };
-
-    struct SegmentationResult {
+    };    struct SegmentationResult {
         std::vector<SkeletalSegment> partialSkeleton;
         std::vector<MeshComponent> meshComponents;
         std::vector<Eigen::Vector3d> skeletonNodes;  // Complete skeleton nodes
@@ -56,10 +54,15 @@ private:
     PairwiseHarmonics* harmonics;
     SegmentationParams params;
 
+    // Global rigidity analysis results
+    std::vector<double> globalVertexRigidity;  // Rigidity value for each mesh vertex
+    bool rigidityComputed;
+
     // Internal methods
     std::vector<int> computeFPSSamples();
     std::vector<SkeletalSegment> generateSkeletalSegments(const std::vector<int>& fpsPoints);
     void computeRigidityAnalysis(std::vector<SkeletalSegment>& segments);
+    void computeGlobalVertexRigidity();  // NEW: Compute rigidity for all mesh vertices
     std::vector<SkeletalSegment> selectPartialSkeleton(const std::vector<SkeletalSegment>& segments);
     std::vector<MeshComponent> createInitialSegmentation(const std::vector<SkeletalSegment>& skeleton);
     void completeSkeleton(std::vector<MeshComponent>& components, std::vector<Eigen::Vector3d>& skeletonNodes);
@@ -68,6 +71,8 @@ private:
     // Helper methods
     double computeNodeRigidity(const std::vector<Eigen::Vector3d>& neighborhood);
     std::vector<Eigen::Vector3d> extractIsocurveCentroids(const Eigen::VectorXd& harmonicField, int sourceIdx, int targetIdx);
+    std::vector<SkeletalSegment> extractRigidityBasedSegments(const Eigen::VectorXd& harmonicField, int sourceIdx, int targetIdx);
+    std::vector<MeshComponent> createImprovedSegmentation(const std::vector<SkeletalSegment>& skeleton); // New improved approach
 
 public:
     /**

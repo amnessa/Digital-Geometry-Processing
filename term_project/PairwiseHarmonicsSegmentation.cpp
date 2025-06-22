@@ -16,7 +16,7 @@
 using namespace std;
 
 PairwiseHarmonicsSegmentation::PairwiseHarmonicsSegmentation(Mesh* m, PairwiseHarmonics* h)
-    : mesh(m), harmonics(h) {
+    : mesh(m), harmonics(h), rigidityComputed(false) {
     // Initialize with default parameters
 }
 
@@ -37,13 +37,16 @@ PairwiseHarmonicsSegmentation::SegmentationResult PairwiseHarmonicsSegmentation:
     cout << "  - Isocurves per field (K): " << params.numIsocurves << endl;
     cout << "  - Rigidity threshold: " << params.rigidityThreshold << endl;
 
-    try {
-        // =============================================================================
-        // STAGE 1: Initial Point Sampling
+    try {        // =============================================================================
+        // STAGE 1: Initial Point Sampling and Global Rigidity Analysis
         // =============================================================================
         cout << "\n--- STAGE 1: FARTHEST POINT SAMPLING ---" << endl;
         result.fpsPoints = computeFPSSamples();
         cout << "Generated " << result.fpsPoints.size() << " FPS samples" << endl;
+
+        cout << "\n--- STAGE 1.5: GLOBAL RIGIDITY ANALYSIS ---" << endl;
+        computeGlobalVertexRigidity();  // Compute global rigidity map
+        cout << "Global rigidity analysis complete" << endl;
 
         // =============================================================================
         // STAGE 2: Skeletal Segment Generation
@@ -58,13 +61,11 @@ PairwiseHarmonicsSegmentation::SegmentationResult PairwiseHarmonicsSegmentation:
         cout << "\n--- STAGE 3: RIGIDITY ANALYSIS ---" << endl;
         computeRigidityAnalysis(rawSegments);
         result.partialSkeleton = selectPartialSkeleton(rawSegments);
-        cout << "Selected " << result.partialSkeleton.size() << " segments for partial skeleton" << endl;
-
-        // =============================================================================
-        // STAGE 4: Initial Segmentation
+        cout << "Selected " << result.partialSkeleton.size() << " segments for partial skeleton" << endl;        // =============================================================================
+        // STAGE 4: Initial Segmentation (IMPROVED APPROACH)
         // =============================================================================
         cout << "\n--- STAGE 4: MESH SEGMENTATION ---" << endl;
-        result.meshComponents = createInitialSegmentation(result.partialSkeleton);
+        result.meshComponents = createImprovedSegmentation(result.partialSkeleton);
         cout << "Created " << result.meshComponents.size() << " mesh components" << endl;
 
         // =============================================================================
@@ -105,31 +106,18 @@ PairwiseHarmonicsSegmentation::generateSkeletalSegments(const vector<int>& fpsPo
             if (processedPairs % 20 == 0 || processedPairs <= 5 || processedPairs >= totalPairs - 2) {
                 cout << "  Pair " << processedPairs << "/" << totalPairs
                      << " (vertices " << fpsPoints[i] << ", " << fpsPoints[j] << ")" << endl;
-            }
-
-            // Compute harmonic field between FPS points
+            }            // Compute harmonic field between FPS points
             Eigen::VectorXd harmonicField = harmonics->computePairwiseHarmonic(fpsPoints[i], fpsPoints[j]);
 
             if (harmonicField.size() != mesh->verts.size()) {
                 continue; // Skip failed computation
             }
 
-            // Extract isocurve centroids to form skeletal nodes
-            vector<Eigen::Vector3d> skeletalNodes = extractIsocurveCentroids(harmonicField, fpsPoints[i], fpsPoints[j]);
+            // Extract segments with rigidity-based cutting (NEW APPROACH)
+            vector<SkeletalSegment> pairSegments = extractRigidityBasedSegments(harmonicField, fpsPoints[i], fpsPoints[j]);
 
-            // Create segment if we have enough nodes
-            if (skeletalNodes.size() >= params.minSkeletalNodes) {
-                SkeletalSegment segment;
-                segment.nodes = skeletalNodes;
-                segment.sourceIdx = fpsPoints[i];
-                segment.targetIdx = fpsPoints[j];
-
-                // Compute segment length
-                segment.length = 0;
-                for (int k = 1; k < skeletalNodes.size(); k++) {
-                    segment.length += (skeletalNodes[k] - skeletalNodes[k-1]).norm();
-                }
-
+            // Add all valid segments from this point pair
+            for (const auto& segment : pairSegments) {
                 // Filter based on length relative to direct endpoint distance
                 Eigen::Vector3d endpointDist(
                     mesh->verts[fpsPoints[i]]->coords[0] - mesh->verts[fpsPoints[j]]->coords[0],
@@ -153,7 +141,16 @@ vector<Eigen::Vector3d> PairwiseHarmonicsSegmentation::extractIsocurveCentroids(
 
     vector<Eigen::Vector3d> centroids;
 
-    // Extract isocurves at regular intervals
+    // CRITICAL FIX: Always include the actual FPS endpoints first!
+    // This ensures skeletal paths reach the limb extremities
+
+    // Add source FPS point (should correspond to harmonic value ~0.0)
+    Eigen::Vector3d sourcePoint(mesh->verts[sourceIdx]->coords[0],
+                               mesh->verts[sourceIdx]->coords[1],
+                               mesh->verts[sourceIdx]->coords[2]);
+    centroids.push_back(sourcePoint);
+
+    // Extract isocurves at regular intervals (excluding endpoints k=0 and k=numIsocurves)
     for (int k = 1; k < params.numIsocurves; k++) {
         double isoValue = double(k) / params.numIsocurves;
 
@@ -180,38 +177,260 @@ vector<Eigen::Vector3d> PairwiseHarmonicsSegmentation::extractIsocurveCentroids(
         }
     }
 
+    // Add target FPS point (should correspond to harmonic value ~1.0)
+    Eigen::Vector3d targetPoint(mesh->verts[targetIdx]->coords[0],
+                               mesh->verts[targetIdx]->coords[1],
+                               mesh->verts[targetIdx]->coords[2]);
+    centroids.push_back(targetPoint);
+
+    cout << "    Extracted " << centroids.size() << " centroids including FPS endpoints" << endl;
+    cout << "      Source FPS " << sourceIdx << " at: (" << sourcePoint[0] << ", " << sourcePoint[1] << ", " << sourcePoint[2] << ")" << endl;
+    cout << "      Target FPS " << targetIdx << " at: (" << targetPoint[0] << ", " << targetPoint[1] << ", " << targetPoint[2] << ")" << endl;
+
     return centroids;
 }
 
-void PairwiseHarmonicsSegmentation::computeRigidityAnalysis(vector<SkeletalSegment>& segments) {
-    cout << "Computing rigidity for " << segments.size() << " segments..." << endl;
+/**
+ * Extract skeletal segments with rigidity-based cutting
+ * IMPROVED VERSION: Uses global mesh rigidity to identify true junction areas
+ */
+vector<PairwiseHarmonicsSegmentation::SkeletalSegment>
+PairwiseHarmonicsSegmentation::extractRigidityBasedSegments(
+    const Eigen::VectorXd& harmonicField, int sourceIdx, int targetIdx) {
 
-    for (auto& segment : segments) {
-        segment.nodeRigidities.clear();
+    vector<SkeletalSegment> segments;
 
-        // Compute rigidity for each node using PCA
-        for (int nodeIdx = 0; nodeIdx < segment.nodes.size(); nodeIdx++) {
-            // Define local neighborhood
-            vector<Eigen::Vector3d> neighborhood;
-            int windowSize = min(5, (int)segment.nodes.size());
-            int start = max(0, nodeIdx - windowSize/2);
-            int end = min((int)segment.nodes.size(), start + windowSize);
+    // Extract isocurve centroids first
+    vector<Eigen::Vector3d> allCentroids = extractIsocurveCentroids(harmonicField, sourceIdx, targetIdx);
 
-            for (int k = start; k < end; k++) {
-                neighborhood.push_back(segment.nodes[k]);
+    if (allCentroids.size() < 3) {
+        return segments; // Need at least 3 points for rigidity analysis
+    }
+
+    // Ensure global rigidity is computed
+    if (!rigidityComputed) {
+        computeGlobalVertexRigidity();
+    }
+
+    // IMPROVED APPROACH: Map skeletal centroids to mesh vertices and use global rigidity
+    vector<double> rigidities;
+
+    cout << "    Mapping " << allCentroids.size() << " centroids to mesh rigidity..." << endl;    for (int i = 0; i < allCentroids.size(); i++) {
+        const Eigen::Vector3d& centroid = allCentroids[i];
+        double centroidRigidity;
+
+        // Special handling for FPS endpoints (first and last centroids)
+        if (i == 0) {
+            // First centroid is source FPS point
+            centroidRigidity = globalVertexRigidity[sourceIdx];
+            cout << "      Centroid " << i << " (SOURCE FPS " << sourceIdx << "): rigidity = " << centroidRigidity << endl;
+        }
+        else if (i == allCentroids.size() - 1) {
+            // Last centroid is target FPS point
+            centroidRigidity = globalVertexRigidity[targetIdx];
+            cout << "      Centroid " << i << " (TARGET FPS " << targetIdx << "): rigidity = " << centroidRigidity << endl;
+        }
+        else {
+            // Interior centroid - find closest mesh vertex
+            double minDistance = 1e10;
+            int closestVertex = 0;
+
+            for (int v = 0; v < mesh->verts.size(); v++) {
+                Eigen::Vector3d vertexPos(mesh->verts[v]->coords[0],
+                                         mesh->verts[v]->coords[1],
+                                         mesh->verts[v]->coords[2]);
+
+                double distance = (vertexPos - centroid).norm();
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    closestVertex = v;
+                }
             }
 
-            double rigidity = computeNodeRigidity(neighborhood);
-            segment.nodeRigidities.push_back(rigidity);
+            // Use the global rigidity of the closest mesh vertex
+            centroidRigidity = globalVertexRigidity[closestVertex];
+
+            // Also sample nearby vertices for more robust analysis
+            vector<double> nearbyRigidities;
+            double searchRadius = 0.05; // Small radius for nearby sampling
+
+            for (int v = 0; v < mesh->verts.size(); v++) {
+                Eigen::Vector3d vertexPos(mesh->verts[v]->coords[0],
+                                         mesh->verts[v]->coords[1],
+                                         mesh->verts[v]->coords[2]);
+
+                double distance = (vertexPos - centroid).norm();
+                if (distance < searchRadius) {
+                    nearbyRigidities.push_back(globalVertexRigidity[v]);
+                }
+            }
+
+            // Use average of nearby rigidities if we have enough samples
+            if (nearbyRigidities.size() >= 3) {
+                double avgRigidity = 0;
+                for (double r : nearbyRigidities) avgRigidity += r;
+                centroidRigidity = avgRigidity / nearbyRigidities.size();
+            }
+
+            if (i % 10 == 0) { // Show progress every 10th point
+                cout << "      Centroid " << i << ": rigidity = " << centroidRigidity
+                     << " (from vertex " << closestVertex << ", " << nearbyRigidities.size() << " nearby)" << endl;
+            }
         }
 
-        // Compute average rigidity for the segment
-        double totalRigidity = 0;
-        for (double r : segment.nodeRigidities) {
-            totalRigidity += r;
+        rigidities.push_back(centroidRigidity);
+    }
+
+    // Find statistics to adaptively set thresholds
+    double minRig = *min_element(rigidities.begin(), rigidities.end());
+    double maxRig = *max_element(rigidities.begin(), rigidities.end());
+    double meanRig = 0;
+    for (double r : rigidities) meanRig += r;
+    meanRig /= rigidities.size();    cout << "    Rigidity statistics: min=" << minRig << ", max=" << maxRig << ", mean=" << meanRig << endl;
+
+    // REVISED APPROACH: Based on research papers and data analysis
+    // Skeletal segments should be preserved as complete limb paths
+    // Only cut at true anatomical junctions (very low rigidity OR major transitions)
+
+    // Analysis of your data shows:
+    // - Global rigidity: [0.40569, 0.999857]
+    // - Skeletal paths: ~0.55-0.83 (these ARE the limb centers, should be preserved!)
+    // - True junctions: likely < 0.6 (main body/torso connections)
+
+    double junctionThreshold = 0.6;    // Based on global analysis - true body junctions
+    double transitionThreshold = 0.65; // Moderate transitions within limbs
+
+    // Override with global context if available
+    if (minRig > 0.5) {
+        // High-rigidity skeletal path - very conservative cutting
+        junctionThreshold = minRig + 0.1 * (maxRig - minRig);  // Only bottom 10%
+        transitionThreshold = minRig + 0.2 * (maxRig - minRig);
+        cout << "    High-rigidity skeletal path detected - using conservative junction detection" << endl;
+    }
+
+    cout << "    Junction detection: junction=" << junctionThreshold << ", transition=" << transitionThreshold << endl;// Cut segments using adaptive thresholding based on actual data distribution
+    cout << "    Cutting segments at low-rigidity junctions using adaptive thresholds..." << endl;
+
+    vector<int> cutPoints; // Indices where to cut
+    cutPoints.push_back(0); // Always start with first point    // Find junction points using conservative thresholding
+    // Goal: Preserve complete limb segments, only cut at true anatomical junctions
+    // IMPORTANT: Never cut near endpoints (first/last 3 points) to preserve limb extremities
+    for (int i = 3; i < rigidities.size() - 3; i++) { // Skip first and last 3 points
+        bool isJunction = false;
+
+        // Primary check: Very low rigidity (definite anatomical junction like torso connection)
+        if (rigidities[i] < junctionThreshold) {
+            isJunction = true;
+            cout << "      ANATOMICAL junction at centroid " << i << " (rigidity: " << rigidities[i] << " < " << junctionThreshold << ")" << endl;
         }
-        segment.avgRigidity = totalRigidity / segment.nodeRigidities.size();
-        segment.quality = segment.avgRigidity * segment.length;
+        // Secondary check: Significant local minimum AND below transition threshold
+        else if (rigidities[i] < transitionThreshold) {
+            // Check if this is a very significant local minimum (not just noise)
+            bool isSignificantMin = true;
+            int windowSize = 6; // Larger window for more stability
+            double minLocalValue = rigidities[i];
+
+            // Check if this is actually the minimum in a substantial neighborhood
+            for (int j = max(3, i - windowSize); j <= min((int)rigidities.size() - 4, i + windowSize); j++) {
+                if (j != i && rigidities[j] <= minLocalValue + 0.03) // Very small tolerance
+                    isSignificantMin = false;
+            }
+
+            // Additional check: must be substantially lower than neighbors
+            double avgNeighbors = 0;
+            int neighborCount = 0;
+            for (int j = max(3, i - 3); j <= min((int)rigidities.size() - 4, i + 3); j++) {
+                if (j != i) {
+                    avgNeighbors += rigidities[j];
+                    neighborCount++;
+                }
+            }
+            if (neighborCount > 0) {
+                avgNeighbors /= neighborCount;
+
+                bool isSubstantialDrop = (avgNeighbors - rigidities[i]) > 0.05; // 5% drop required
+
+                if (isSignificantMin && isSubstantialDrop) {
+                    isJunction = true;
+                    cout << "      Significant transition at centroid " << i << " (rigidity: " << rigidities[i]
+                         << ", drop: " << (avgNeighbors - rigidities[i]) << ")" << endl;
+                }
+            }
+        }if (isJunction) {
+            cutPoints.push_back(i);
+        }
+    }
+    cutPoints.push_back(allCentroids.size() - 1); // Always end with last point
+
+    // If no junctions found, preserve the entire skeletal path as one segment
+    if (cutPoints.size() == 2) { // Only start and end points
+        cout << "    No significant junctions detected - preserving complete skeletal path" << endl;
+    }
+
+    cout << "    Found " << (cutPoints.size() - 1) << " segments from " << cutPoints.size() << " cut points" << endl;
+
+    // Create segments between cut points
+    for (int cutIdx = 0; cutIdx < cutPoints.size() - 1; cutIdx++) {
+        int startIdx = cutPoints[cutIdx];
+        int endIdx = cutPoints[cutIdx + 1];
+
+        if (endIdx - startIdx >= 2) { // Need at least 2 points for a segment
+            SkeletalSegment segment;
+
+            // Copy nodes for this segment
+            for (int i = startIdx; i <= endIdx; i++) {
+                segment.nodes.push_back(allCentroids[i]);
+                if (i < rigidities.size()) {
+                    segment.nodeRigidities.push_back(rigidities[i]);
+                }
+            }
+
+            segment.sourceIdx = sourceIdx;
+            segment.targetIdx = targetIdx;
+
+            // Compute segment length
+            segment.length = 0;
+            for (int i = 1; i < segment.nodes.size(); i++) {
+                segment.length += (segment.nodes[i] - segment.nodes[i-1]).norm();
+            }
+
+            // Compute average rigidity
+            double totalRigidity = 0;
+            for (double r : segment.nodeRigidities) {
+                totalRigidity += r;
+            }
+            segment.avgRigidity = totalRigidity / segment.nodeRigidities.size();
+            segment.quality = segment.avgRigidity * segment.length;
+
+            segments.push_back(segment);
+
+            cout << "      Created segment " << segments.size() - 1 << ": "
+                 << segment.nodes.size() << " nodes, length: " << segment.length
+                 << ", avg rigidity: " << segment.avgRigidity << endl;
+        }
+    }
+
+    return segments;
+}
+
+void PairwiseHarmonicsSegmentation::computeRigidityAnalysis(vector<SkeletalSegment>& segments) {
+    cout << "Rigidity analysis complete for " << segments.size() << " segments" << endl;
+    cout << "(Using global vertex rigidity computed in extractRigidityBasedSegments)" << endl;
+
+    // Print summary statistics
+    if (!segments.empty()) {
+        double minAvgRig = 1.0, maxAvgRig = 0.0, totalAvgRig = 0.0;
+
+        for (const auto& segment : segments) {
+            if (segment.avgRigidity < minAvgRig) minAvgRig = segment.avgRigidity;
+            if (segment.avgRigidity > maxAvgRig) maxAvgRig = segment.avgRigidity;
+            totalAvgRig += segment.avgRigidity;
+        }
+
+        cout << "Segment rigidity summary:" << endl;
+        cout << "  Min avg rigidity: " << minAvgRig << endl;
+        cout << "  Max avg rigidity: " << maxAvgRig << endl;
+        cout << "  Overall avg rigidity: " << (totalAvgRig / segments.size()) << endl;
     }
 }
 
@@ -255,55 +474,90 @@ double PairwiseHarmonicsSegmentation::computeNodeRigidity(const vector<Eigen::Ve
 vector<PairwiseHarmonicsSegmentation::SkeletalSegment>
 PairwiseHarmonicsSegmentation::selectPartialSkeleton(const vector<SkeletalSegment>& segments) {
 
-    // Sort segments by quality (rigidity * length)
-    vector<SkeletalSegment> sortedSegments = segments;
-    sort(sortedSegments.begin(), sortedSegments.end(),
+    cout << "  Selecting diverse skeletal segments for anatomical coverage..." << endl;
+    cout << "  Input: " << segments.size() << " candidate segments" << endl;
+
+    // STRATEGY: Enforce spatial diversity from the start
+    // Group segments by their source FPS point, then select the best from each group
+    map<int, vector<SkeletalSegment>> segmentsBySource;
+
+    for (const auto& seg : segments) {
+        segmentsBySource[seg.sourceIdx].push_back(seg);
+    }
+
+    cout << "  Segments grouped by " << segmentsBySource.size() << " source FPS points" << endl;
+
+    // Sort segments within each group by quality
+    for (auto& group : segmentsBySource) {
+        sort(group.second.begin(), group.second.end(),
+             [](const SkeletalSegment& a, const SkeletalSegment& b) {
+                 return a.quality > b.quality;
+             });
+    }
+
+    // Phase 1: Select the single best segment from each source point
+    // This ensures maximum spatial diversity
+    vector<SkeletalSegment> diverseSegments;
+
+    cout << "  Phase 1: Selecting best segment from each source point..." << endl;
+    for (const auto& group : segmentsBySource) {
+        if (!group.second.empty()) {
+            const SkeletalSegment& bestFromGroup = group.second[0];
+            diverseSegments.push_back(bestFromGroup);
+
+            cout << "    From FPS " << group.first << ": selected "
+                 << bestFromGroup.sourceIdx << " -> " << bestFromGroup.targetIdx
+                 << " (length: " << bestFromGroup.length
+                 << ", quality: " << bestFromGroup.quality << ")" << endl;
+        }
+    }
+
+    // Sort the diverse segments by quality for final selection
+    sort(diverseSegments.begin(), diverseSegments.end(),
          [](const SkeletalSegment& a, const SkeletalSegment& b) {
              return a.quality > b.quality;
          });
 
-    // Greedy selection to build connected skeleton
+    // Phase 2: Select top segments up to the limit, ensuring no FPS point is heavily reused
     vector<SkeletalSegment> skeleton;
-    set<int> usedFPSPoints;
+    set<int> usedSources;
+    set<int> usedTargets;
 
-    // Start with highest quality segment
-    if (!sortedSegments.empty()) {
-        skeleton.push_back(sortedSegments[0]);
-        usedFPSPoints.insert(sortedSegments[0].sourceIdx);
-        usedFPSPoints.insert(sortedSegments[0].targetIdx);
+    cout << "  Phase 2: Final selection with diversity constraints..." << endl;
 
-        // Add connecting segments
-        for (int iter = 0; iter < 10 && skeleton.size() < params.maxSkeletonSegments; iter++) {
-            double bestQuality = 0;
-            int bestIdx = -1;
+    int maxSegments = min(params.maxSkeletonSegments, (int)diverseSegments.size());
+    for (int i = 0; i < maxSegments; i++) {
+        const auto& seg = diverseSegments[i];
 
-            for (int i = 1; i < sortedSegments.size(); i++) {
-                const auto& seg = sortedSegments[i];
+        // Prefer segments that don't reuse FPS points
+        bool reuseSource = usedSources.count(seg.sourceIdx) > 0;
+        bool reuseTarget = usedTargets.count(seg.targetIdx) > 0;
 
-                // Check if connects to existing skeleton
-                bool connects = (usedFPSPoints.count(seg.sourceIdx) > 0) ||
-                              (usedFPSPoints.count(seg.targetIdx) > 0);
-
-                // Avoid cycles
-                bool createsCycle = (usedFPSPoints.count(seg.sourceIdx) > 0) &&
-                                  (usedFPSPoints.count(seg.targetIdx) > 0);
-
-                if (connects && !createsCycle && seg.quality > bestQuality) {
-                    bestQuality = seg.quality;
-                    bestIdx = i;
-                }
-            }
-
-            if (bestIdx >= 0) {
-                skeleton.push_back(sortedSegments[bestIdx]);
-                usedFPSPoints.insert(sortedSegments[bestIdx].sourceIdx);
-                usedFPSPoints.insert(sortedSegments[bestIdx].targetIdx);
-                sortedSegments.erase(sortedSegments.begin() + bestIdx);
-            } else {
-                break;
-            }
+        // Allow some reuse if we have fewer segments than desired, but prefer new points
+        bool acceptSegment = true;
+        if (skeleton.size() >= maxSegments / 2) { // Be stricter in later selections
+            acceptSegment = !reuseSource && !reuseTarget;
         }
+
+        if (acceptSegment) {
+            skeleton.push_back(seg);
+            usedSources.insert(seg.sourceIdx);
+            usedTargets.insert(seg.targetIdx);
+
+            cout << "    Selected segment " << skeleton.size() << ": "
+                 << seg.sourceIdx << " -> " << seg.targetIdx
+                 << " (length: " << seg.length << ", quality: " << seg.quality << ")" << endl;
+        } else {
+            cout << "    Skipped segment " << seg.sourceIdx << " -> " << seg.targetIdx
+                 << " (FPS point reuse)" << endl;
+        }
+
+        if (skeleton.size() >= params.maxSkeletonSegments) break;
     }
+
+    cout << "  Final selection: " << skeleton.size() << " diverse skeletal segments" << endl;
+    cout << "  Used " << usedSources.size() << " unique source FPS points" << endl;
+    cout << "  Used " << usedTargets.size() << " unique target FPS points" << endl;
 
     return skeleton;
 }
@@ -373,6 +627,163 @@ PairwiseHarmonicsSegmentation::createInitialSegmentation(const vector<SkeletalSe
         }
     }
 
+    return components;
+}
+
+/**
+ * Create improved mesh segmentation that properly handles torso/junction areas
+ * Based on the paper's approach: assign vertices to limb segments, then group remainder as torso
+ */
+vector<PairwiseHarmonicsSegmentation::MeshComponent>
+PairwiseHarmonicsSegmentation::createImprovedSegmentation(const vector<SkeletalSegment>& skeleton) {
+
+    vector<MeshComponent> components;
+    vector<int> vertexToComponent(mesh->verts.size(), -1);
+    vector<double> vertexConfidence(mesh->verts.size(), 0.0);
+
+    cout << "Creating improved segmentation with " << skeleton.size() << " skeletal segments..." << endl;
+
+    // Stage 1: Assign vertices to skeletal segments with confidence scoring
+    for (int segIdx = 0; segIdx < skeleton.size(); segIdx++) {
+        const auto& segment = skeleton[segIdx];
+
+        cout << "  Processing segment " << segIdx << " (source: " << segment.sourceIdx
+             << ", target: " << segment.targetIdx << ")" << endl;
+
+        Eigen::VectorXd harmonicField = harmonics->computePairwiseHarmonic(segment.sourceIdx, segment.targetIdx);
+        if (harmonicField.size() != mesh->verts.size()) continue;
+
+        MeshComponent component;
+        component.skeletonSegmentId = segIdx;
+
+        // Find optimal threshold for this harmonic field
+        double minVal = harmonicField.minCoeff();
+        double maxVal = harmonicField.maxCoeff();
+        double midVal = (minVal + maxVal) / 2.0;
+        double range = maxVal - minVal;
+
+        if (range < 1e-6) continue; // Skip degenerate fields
+
+        // Use isocurve-based assignment: vertices near isocurves belong to this segment
+        for (int v = 0; v < mesh->verts.size(); v++) {
+            double harmonicValue = harmonicField(v);
+
+            // Compute distance to skeletal path to determine association strength
+            Eigen::Vector3d vertexPos(mesh->verts[v]->coords[0],
+                                     mesh->verts[v]->coords[1],
+                                     mesh->verts[v]->coords[2]);
+
+            double minDistToSkeleton = 1e10;
+            for (const auto& node : segment.nodes) {
+                double dist = (vertexPos - node).norm();
+                minDistToSkeleton = min(minDistToSkeleton, dist);
+            }
+
+            // Compute confidence based on harmonic field gradient and distance to skeleton
+            double harmonicConfidence = 1.0 - abs(harmonicValue - midVal) / (range / 2.0);
+            double spatialConfidence = exp(-minDistToSkeleton * 5.0); // Exponential falloff
+            double totalConfidence = harmonicConfidence * spatialConfidence;
+
+            // Assign vertex if this is the best segment so far
+            if (totalConfidence > vertexConfidence[v] && totalConfidence > 0.3) {
+                vertexToComponent[v] = segIdx;
+                vertexConfidence[v] = totalConfidence;
+                component.vertexIndices.push_back(v);
+            }
+        }
+
+        if (!component.vertexIndices.empty()) {
+            // Compute component center
+            Eigen::Vector3d center = Eigen::Vector3d::Zero();
+            for (int vIdx : component.vertexIndices) {
+                center += Eigen::Vector3d(mesh->verts[vIdx]->coords[0],
+                                         mesh->verts[vIdx]->coords[1],
+                                         mesh->verts[vIdx]->coords[2]);
+            }
+            component.center = center / component.vertexIndices.size();
+
+            components.push_back(component);
+            cout << "    Created limb component " << segIdx << " with " << component.vertexIndices.size() << " vertices" << endl;
+        }
+    }
+
+    // Stage 2: Handle unassigned vertices (torso/junction areas)
+    vector<int> unassignedVertices;
+    for (int v = 0; v < mesh->verts.size(); v++) {
+        if (vertexToComponent[v] == -1) {
+            unassignedVertices.push_back(v);
+        }
+    }
+
+    cout << "  Found " << unassignedVertices.size() << " unassigned vertices for torso/junction components" << endl;
+
+    if (!unassignedVertices.empty()) {
+        // Group unassigned vertices using connected components analysis
+        vector<bool> visited(mesh->verts.size(), false);
+
+        for (int v : unassignedVertices) {
+            if (visited[v]) continue;
+
+            // Start new torso component with connected component search
+            MeshComponent torsoComponent;
+            torsoComponent.skeletonSegmentId = -1; // Mark as torso/junction
+            vector<int> componentVertices;
+              // BFS to find connected unassigned vertices using triangle adjacency
+            queue<int> toVisit;
+            toVisit.push(v);
+            visited[v] = true;
+
+            while (!toVisit.empty()) {
+                int currentV = toVisit.front();
+                toVisit.pop();
+                componentVertices.push_back(currentV);
+
+                // Check neighbors through triangle connectivity
+                for (int triIdx = 0; triIdx < mesh->tris.size(); triIdx++) {
+                    Triangle* tri = mesh->tris[triIdx];
+                    vector<int> triVertices = {tri->v1i, tri->v2i, tri->v3i};
+
+                    // Check if current vertex is in this triangle
+                    bool containsCurrent = false;
+                    for (int vIdx : triVertices) {
+                        if (vIdx == currentV) {
+                            containsCurrent = true;
+                            break;
+                        }
+                    }
+
+                    if (containsCurrent) {
+                        // Add unvisited unassigned neighbors from this triangle
+                        for (int neighborV : triVertices) {
+                            if (neighborV != currentV && !visited[neighborV] &&
+                                vertexToComponent[neighborV] == -1) {
+                                visited[neighborV] = true;
+                                toVisit.push(neighborV);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (componentVertices.size() > 10) { // Only keep substantial components
+                torsoComponent.vertexIndices = componentVertices;
+
+                // Compute component center
+                Eigen::Vector3d center = Eigen::Vector3d::Zero();
+                for (int vIdx : componentVertices) {
+                    center += Eigen::Vector3d(mesh->verts[vIdx]->coords[0],
+                                             mesh->verts[vIdx]->coords[1],
+                                             mesh->verts[vIdx]->coords[2]);
+                }
+                torsoComponent.center = center / componentVertices.size();
+
+                components.push_back(torsoComponent);
+                cout << "    Created torso/junction component with " << componentVertices.size() << " vertices" << endl;
+            }
+        }
+    }
+
+    cout << "Improved segmentation complete: " << components.size() << " total components" << endl;
     return components;
 }
 
@@ -524,4 +935,81 @@ void PairwiseHarmonicsSegmentation::visualizeResults(
     cout << "  - " << result.partialSkeleton.size() << " skeletal segments (colored by rigidity)" << endl;
     cout << "  - " << result.meshComponents.size() << " mesh components" << endl;
     cout << "  - " << result.skeletonNodes.size() << " skeleton nodes (magenta points)" << endl;
+}
+
+void PairwiseHarmonicsSegmentation::computeGlobalVertexRigidity() {
+    if (rigidityComputed) return; // Already computed
+
+    cout << "Computing global vertex rigidity for " << mesh->verts.size() << " vertices..." << endl;
+    globalVertexRigidity.clear();
+    globalVertexRigidity.resize(mesh->verts.size());
+
+    // For each vertex, compute rigidity based on its local neighborhood
+    for (int v = 0; v < mesh->verts.size(); v++) {
+        if (v % 500 == 0) {
+            cout << "  Processing vertex " << v << "/" << mesh->verts.size() << endl;
+        }
+
+        // Find neighboring vertices using triangle connectivity
+        vector<Eigen::Vector3d> neighborhood;
+        Eigen::Vector3d centerVertex(mesh->verts[v]->coords[0],
+                                    mesh->verts[v]->coords[1],
+                                    mesh->verts[v]->coords[2]);
+        neighborhood.push_back(centerVertex);
+
+        // Find neighbors through triangles
+        set<int> neighborIndices;
+        for (int triIdx = 0; triIdx < mesh->tris.size(); triIdx++) {
+            Triangle* tri = mesh->tris[triIdx];
+            vector<int> triVertices = {tri->v1i, tri->v2i, tri->v3i};
+
+            // If this triangle contains vertex v, add its other vertices as neighbors
+            bool containsV = false;
+            for (int vIdx : triVertices) {
+                if (vIdx == v) {
+                    containsV = true;
+                    break;
+                }
+            }
+
+            if (containsV) {
+                for (int neighborV : triVertices) {
+                    if (neighborV != v) {
+                        neighborIndices.insert(neighborV);
+                    }
+                }
+            }
+        }
+
+        // Add neighbor positions to analysis
+        for (int neighborIdx : neighborIndices) {
+            if (neighborIdx >= 0 && neighborIdx < mesh->verts.size()) {
+                neighborhood.push_back(Eigen::Vector3d(
+                    mesh->verts[neighborIdx]->coords[0],
+                    mesh->verts[neighborIdx]->coords[1],
+                    mesh->verts[neighborIdx]->coords[2]
+                ));
+            }
+        }
+
+        // Compute rigidity for this vertex
+        if (neighborhood.size() >= 3) {
+            globalVertexRigidity[v] = computeNodeRigidity(neighborhood);
+        } else {
+            globalVertexRigidity[v] = 0.5; // Default for isolated vertices
+        }
+    }
+
+    // Print statistics
+    double minRig = *min_element(globalVertexRigidity.begin(), globalVertexRigidity.end());
+    double maxRig = *max_element(globalVertexRigidity.begin(), globalVertexRigidity.end());
+    double avgRig = 0;
+    for (double r : globalVertexRigidity) avgRig += r;
+    avgRig /= globalVertexRigidity.size();
+
+    cout << "Global vertex rigidity computed:" << endl;
+    cout << "  Range: [" << minRig << ", " << maxRig << "]" << endl;
+    cout << "  Average: " << avgRig << endl;
+
+    rigidityComputed = true;
 }
