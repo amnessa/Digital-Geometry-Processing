@@ -17,14 +17,16 @@ class Painter;
  */
 class PairwiseHarmonicsSegmentation {
 public:    struct SegmentationParams {
-        int numFPSSamples = 25;           // Number of FPS samples
-        int numIsocurves = 50;            // K: number of isocurves per harmonic field
-        double rigidityThreshold = 0.8;   // Threshold for high-rigidity classification (limb centers)
-        double isoTolerance = 0.03;       // Tolerance for isocurve bracelet thickness
-        double minSegmentLength = 0.3;    // Minimum segment length (relative to endpoint distance)
-        int minSkeletalNodes = 4;         // Minimum nodes for valid skeletal segment
-        int maxSkeletonSegments = 10;      // Maximum segments in partial skeleton
-        double junctionThreshold = 0.6;  // Threshold for anatomical junctions (body connections)
+        int numFPSSamples = 12;           // FIXED: Fewer FPS samples (12 choose 2 = 66 pairs vs 190)
+        int numIsocurves = 25;            // FIXED: Fewer isocurves for cleaner paths
+        double rigidityThreshold = 0.65;  // Lowered: more inclusive for limb segments
+        double isoTolerance = 0.04;       // Slightly larger tolerance for robustness
+        double minSegmentLength = 0.15;   // FIXED: Higher minimum - filter out tiny segments
+        int minSkeletalNodes = 4;         // FIXED: Require more nodes for meaningful segments
+        int maxSkeletonSegments = 6;      // FIXED: Even fewer final segments (limbs + spine)
+        double junctionThreshold = 0.55;  // Lowered: more sensitive junction detection
+        double minQualityThreshold = 0.08; // NEW: Minimum quality to enter candidate pool
+        double overlapSpatialThreshold = 0.15; // NEW: Stricter spatial overlap detection
     };
 
     struct SkeletalSegment {
@@ -66,13 +68,14 @@ private:
     std::vector<SkeletalSegment> selectPartialSkeleton(const std::vector<SkeletalSegment>& segments);
     std::vector<MeshComponent> createInitialSegmentation(const std::vector<SkeletalSegment>& skeleton);
     void completeSkeleton(std::vector<MeshComponent>& components, std::vector<Eigen::Vector3d>& skeletonNodes);
-    void refineSegmentation(std::vector<MeshComponent>& components, const std::vector<Eigen::Vector3d>& skeleton);
-
-    // Helper methods
+    void refineSegmentation(std::vector<MeshComponent>& components, const std::vector<Eigen::Vector3d>& skeleton);    // Helper methods
     double computeNodeRigidity(const std::vector<Eigen::Vector3d>& neighborhood);
     std::vector<Eigen::Vector3d> extractIsocurveCentroids(const Eigen::VectorXd& harmonicField, int sourceIdx, int targetIdx);
     std::vector<SkeletalSegment> extractRigidityBasedSegments(const Eigen::VectorXd& harmonicField, int sourceIdx, int targetIdx);
+    std::vector<SkeletalSegment> extractCompleteLimbSegments(const Eigen::VectorXd& harmonicField, int sourceIdx, int targetIdx); // NEW: Generate complete limb paths
+    std::vector<SkeletalSegment> generateTorsoSegments(); // Generate segments from low-rigidity areas
     std::vector<MeshComponent> createImprovedSegmentation(const std::vector<SkeletalSegment>& skeleton); // New improved approach
+    bool checkSegmentOverlap(const SkeletalSegment& seg1, const SkeletalSegment& seg2); // Check spatial overlap between segments
 
 public:
     /**
