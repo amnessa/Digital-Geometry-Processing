@@ -4,5 +4,6 @@ eigen-3.4.0
 libigl
 eigen-install
 libigl-2.6.0
+*.pdb
 
 MeshsegBenchmark-1.0-full.zip
