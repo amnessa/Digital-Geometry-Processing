@@ -8,6 +8,7 @@
 #include <queue>
 #include <limits>
 #include <cmath>
+#include <cstring>  // For strcmp function
 #include <Eigen/Dense>
 #include <limits> // Required for std::numeric_limits
 #include <cmath> // For std::sqrt
@@ -33,23 +34,30 @@ void Mesh::loadOff(char* name)
 
 	fscanf(fPtr, "%s", str);
 
-	int nVerts, nTris, n, i = 0;
-	float x, y, z;
+	// Check if this is NOFF format (includes normals) or standard OFF format
+	bool isNOFF = (strcmp(str, "NOFF") == 0);
 
+	int nVerts, nTris, n, i = 0;
+	float x, y, z, nx, ny, nz;
 	fscanf(fPtr, "%d %d %d\n", &nVerts, &nTris, &n);
+
 	while (i++ < nVerts)
 	{
-		fscanf(fPtr, "%f %f %f", &x, &y, &z);
+		if (isNOFF) {
+			// NOFF format: read position and normal (but we only use position)
+			fscanf(fPtr, "%f %f %f %f %f %f", &x, &y, &z, &nx, &ny, &nz);
+		} else {
+			// Standard OFF format: read only position
+			fscanf(fPtr, "%f %f %f", &x, &y, &z);
+		}
 		addVertex(x, y, z);
 	}
 
 	while (fscanf(fPtr, "%d", &i) != EOF)
 	{
-		fscanf(fPtr, "%f %f %f", &x, &y, &z);
-		addTriangle((int) x, (int) y, (int) z);
-		makeVertsNeighbor(x, y);
-		makeVertsNeighbor(y, z);
-		makeVertsNeighbor(x, z);
+		int v1, v2, v3;
+		fscanf(fPtr, "%d %d %d", &v1, &v2, &v3);
+		addTriangle(v1, v2, v3);
 	}
 
 	fclose(fPtr);
@@ -121,6 +129,15 @@ void Mesh::createCube(float sideLen)
  */
 void Mesh::addTriangle(int v1, int v2, int v3)
 {
+	// Validate vertex indices
+	if (v1 < 0 || v1 >= verts.size() ||
+	    v2 < 0 || v2 >= verts.size() ||
+	    v3 < 0 || v3 >= verts.size()) {
+		cout << "Error: Invalid vertex indices in triangle: " << v1 << ", " << v2 << ", " << v3 << endl;
+		cout << "Valid range: 0 to " << (verts.size() - 1) << endl;
+		return;
+	}
+
 	int idx = tris.size();
 	tris.push_back( new Triangle(idx, v1, v2, v3) );
 
@@ -148,6 +165,12 @@ void Mesh::addTriangle(int v1, int v2, int v3)
  */
 bool Mesh::makeVertsNeighbor(int v1i, int v2i)
 {
+	// Validate vertex indices
+	if (v1i < 0 || v1i >= verts.size() || v2i < 0 || v2i >= verts.size()) {
+		cout << "Error: Invalid vertex indices in makeVertsNeighbor: " << v1i << ", " << v2i << endl;
+		return false;
+	}
+
 	// Check if already neighbors
 	for (int i = 0; i < verts[v1i]->vertList.size(); i++)
 		if (verts[v1i]->vertList[i] == v2i)

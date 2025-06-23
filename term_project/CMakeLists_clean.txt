@@ -81,9 +81,7 @@ add_custom_command(TARGET PairwiseHarmonicsSegmentation POST_BUILD
         $<TARGET_FILE_DIR:PairwiseHarmonicsSegmentation>
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_SOURCE_DIR}/dynamic_link_lib/msvcr71d.dll"
-        $<TARGET_FILE_DIR:PairwiseHarmonicsSegmentation>
-
-    # Copy mesh files to executable directory (not subdirectory)
+        $<TARGET_FILE_DIR:PairwiseHarmonicsSegmentation>    # Copy mesh files to executable directory (not subdirectory)
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_SOURCE_DIR}/models/50.off"
         $<TARGET_FILE_DIR:PairwiseHarmonicsSegmentation>/
@@ -98,6 +96,15 @@ add_custom_command(TARGET PairwiseHarmonicsSegmentation POST_BUILD
         $<TARGET_FILE_DIR:PairwiseHarmonicsSegmentation>/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_SOURCE_DIR}/models/Armadillo.off"
+        $<TARGET_FILE_DIR:PairwiseHarmonicsSegmentation>/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/models/chair.off"
+        $<TARGET_FILE_DIR:PairwiseHarmonicsSegmentation>/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/models/cow.off"
+        $<TARGET_FILE_DIR:PairwiseHarmonicsSegmentation>/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/models/hand.off"
         $<TARGET_FILE_DIR:PairwiseHarmonicsSegmentation>/
 )
 

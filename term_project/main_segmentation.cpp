@@ -79,6 +79,7 @@ const int DEFAULT_FPS_SAMPLES = 25;     // Number of FPS samples for initial poi
 
 // Forward declarations
 void loadMesh();
+void unloadMesh();
 void showMainMenu();
 void performFullSegmentation();
 void clearVisualization();
@@ -100,14 +101,34 @@ void loadMesh() {
     string meshPath;
     cout << "\n=== LOAD MESH ===" << endl;
     cout << "Available meshes:" << endl;
-    cout << "  - 50.off" << endl;
-    cout << "  - 249.off" << endl;
-    cout << "  - 348.off" << endl;
-    cout << "  - man0.off" << endl;
-    cout << "  - Armadillo.off" << endl;
-    cout << "Enter mesh filename: ";
-    cin >> meshPath;    // Clear previous state
-    clearVisualization();
+    cout << "  1. 50.off" << endl;
+    cout << "  2. 249.off" << endl;
+    cout << "  3. 348.off" << endl;
+    cout << "  4. man0.off" << endl;
+    cout << "  5. Armadillo.off" << endl;
+    cout << "  6. chair.off" << endl;
+    cout << "  7. cow.off" << endl;
+    cout << "  8. hand.off" << endl;
+    cout << "\nEnter mesh number (1-8) or filename directly: ";
+
+    string input;
+    cin >> input;
+
+    // Check if input is a number or filename
+    if (input == "1") meshPath = "50.off";
+    else if (input == "2") meshPath = "249.off";
+    else if (input == "3") meshPath = "348.off";
+    else if (input == "4") meshPath = "man0.off";
+    else if (input == "5") meshPath = "Armadillo.off";
+    else if (input == "6") meshPath = "chair.off";
+    else if (input == "7") meshPath = "cow.off";
+    else if (input == "8") meshPath = "hand.off";    else meshPath = input; // Assume it's a direct filename
+
+    // Clear previous state completely
+    if (g_root) {
+        g_root->removeAllChildren();
+    }
+
     if (g_segmentation) {
         delete g_segmentation;
         g_segmentation = nullptr;
@@ -119,7 +140,9 @@ void loadMesh() {
     if (g_mesh) {
         delete g_mesh;
         g_mesh = nullptr;
-    }// Create and load new mesh
+    }
+
+    // Create and load new mesh
     g_mesh = new Mesh();
 
     // Construct full path to mesh file in models directory
@@ -287,28 +310,29 @@ void performFullSegmentation() {
 void showMainMenu() {
     cout << "\n======================================" << endl;
     cout << "PAIRWISE HARMONICS SEGMENTATION SYSTEM" << endl;
-    cout << "======================================" << endl;
-    cout << "1. Load Mesh" << endl;
-    cout << "2. Test Cotangent Laplacian" << endl;
-    cout << "3. Test Farthest Point Sampling" << endl;
-    cout << "4. Test Pairwise Harmonics" << endl;
-    cout << "5. Test Iso-curve Extraction" << endl;    cout << "6. Test Rigidity Analysis" << endl;
-    cout << "7. Perform Full Segmentation" << endl;
-    cout << "8. Clear Visualization" << endl;    cout << "--- ENHANCED ANALYSIS ---" << endl;
-    cout << "9. Improved Iso-curve Extraction (Dense Bracelets)" << endl;
-    cout << "10. Enhanced Rigidity Analysis (All Nodes)" << endl;
-    cout << "11. Visualize All Rigidity Points (Color-coded)" << endl;
-    cout << "12. Interactive Rigidity Threshold Testing" << endl;    cout << "--- SEGMENTATION VISUALIZATION ---" << endl;
-    cout << "18. Visualize Mesh Components (Colored Vertex Clusters)" << endl;
-    cout << "19. Skeletal K-means Clustering (Euclidean Distance)" << endl;
-    cout << "20. Analyze Skeletal Segments (Diagnostic)" << endl;
-    cout << "21. Detailed Rigidity Analysis (Debug Cutting)" << endl;
+    cout << "======================================" << endl;    cout << "1. Load Mesh" << endl;
+    cout << "2. Unload Current Mesh" << endl;
+    cout << "3. Test Cotangent Laplacian" << endl;
+    cout << "4. Test Farthest Point Sampling" << endl;
+    cout << "5. Test Pairwise Harmonics" << endl;
+    cout << "6. Test Iso-curve Extraction" << endl;
+    cout << "7. Test Rigidity Analysis" << endl;
+    cout << "8. Perform Full Segmentation" << endl;
+    cout << "9. Clear Visualization" << endl;    cout << "--- ENHANCED ANALYSIS ---" << endl;
+    cout << "10. Improved Iso-curve Extraction (Dense Bracelets)" << endl;
+    cout << "11. Enhanced Rigidity Analysis (All Nodes)" << endl;
+    cout << "12. Visualize All Rigidity Points (Color-coded)" << endl;
+    cout << "13. Interactive Rigidity Threshold Testing" << endl;    cout << "--- SEGMENTATION VISUALIZATION ---" << endl;
+    cout << "19. Visualize Mesh Components (Colored Vertex Clusters)" << endl;
+    cout << "20. Skeletal K-means Clustering (Euclidean Distance)" << endl;
+    cout << "21. Analyze Skeletal Segments (Diagnostic)" << endl;
+    cout << "22. Detailed Rigidity Analysis (Debug Cutting)" << endl;
     cout << "--- LIBIGL ENHANCED FEATURES ---" << endl;
-    cout << "13. Test Heat Geodesics (LibIGL)" << endl;
-    cout << "14. Enhanced FPS with Heat Geodesics" << endl;
-    cout << "15. Compare Geodesic Methods (Dijkstra vs Heat)" << endl;
-    cout << "16. Enhanced R&D Descriptors (LibIGL)" << endl;
-    cout << "17. Mesh Analysis (Normals, Curvature, Areas)" << endl;
+    cout << "14. Test Heat Geodesics (LibIGL)" << endl;
+    cout << "15. Enhanced FPS with Heat Geodesics" << endl;
+    cout << "16. Compare Geodesic Methods (Dijkstra vs Heat)" << endl;
+    cout << "17. Enhanced R&D Descriptors (LibIGL)" << endl;
+    cout << "18. Mesh Analysis (Normals, Curvature, Areas)" << endl;
     cout << "0. Exit" << endl;
     cout << "======================================" << endl;
     cout << "Choose option: ";
@@ -334,70 +358,76 @@ DWORD WINAPI ConsoleInputThread(LPVOID lpParam) {
         }
 
         // Clear any remaining characters in the input buffer
-        cin.ignore(numeric_limits<streamsize>::max(), '\n');switch (choice) {
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');        switch (choice) {
             case 1:
                 loadMesh();
                 break;
             case 2:
-                testCotangentLaplacian();
+                unloadMesh();
                 break;
             case 3:
-                testFarthestPointSampling();
+                testCotangentLaplacian();
                 break;
             case 4:
-                testPairwiseHarmonics();
+                testFarthestPointSampling();
                 break;
             case 5:
-                testIsoCurveExtraction();
+                testPairwiseHarmonics();
                 break;
             case 6:
-                testRigidityAnalysis();
+                testIsoCurveExtraction();
                 break;
             case 7:
-                performFullSegmentation();
+                testRigidityAnalysis();
                 break;
             case 8:
+                performFullSegmentation();
+                break;
+            case 9:
                 clearVisualization();
                 g_viewer->scheduleRedraw();
                 g_viewer->viewAll();
                 cout << "Visualization cleared." << endl;
-                break;            case 9:
-                IsocurveAnalysis::improvedIsoCurveExtraction(g_mesh, g_harmonics, g_fps_samples, g_root, g_viewer, g_skeletal_segments);
                 break;
             case 10:
-                RigidityAnalysis::enhancedRigidityAnalysis(g_mesh, g_harmonics, g_fps_samples, g_skeletal_segments, g_rigidity_scores, g_nonrigid_nodes);
+                IsocurveAnalysis::improvedIsoCurveExtraction(g_mesh, g_harmonics, g_fps_samples, g_root, g_viewer, g_skeletal_segments);
                 break;
             case 11:
-                RigidityAnalysis::visualizeAllRigidityPoints(g_mesh, g_skeletal_segments, g_rigidity_scores, g_root, g_viewer);
+                RigidityAnalysis::enhancedRigidityAnalysis(g_mesh, g_harmonics, g_fps_samples, g_skeletal_segments, g_rigidity_scores, g_nonrigid_nodes);
                 break;
             case 12:
-                RigidityAnalysis::interactiveRigidityThresholdTesting(g_skeletal_segments, g_rigidity_scores, g_root, g_viewer);
+                RigidityAnalysis::visualizeAllRigidityPoints(g_mesh, g_skeletal_segments, g_rigidity_scores, g_root, g_viewer);
                 break;
             case 13:
-                testHeatGeodesics();
+                RigidityAnalysis::interactiveRigidityThresholdTesting(g_skeletal_segments, g_rigidity_scores, g_root, g_viewer);
                 break;
             case 14:
-                testEnhancedFPS();
+                testHeatGeodesics();
                 break;
             case 15:
+                testEnhancedFPS();
+                break;
+            case 16:
                 compareGeodesicMethods();
-                break;            case 16:
-                testEnhancedDescriptors();
                 break;
             case 17:
-                testMeshAnalysis();
+                testEnhancedDescriptors();
                 break;
             case 18:
-                visualizeMeshSegmentationClusters();
+                testMeshAnalysis();
                 break;
             case 19:
+                visualizeMeshSegmentationClusters();
+                break;
+            case 20:
                 visualizeSkeletalKMeansClustering();
-                break;        case 20:
-            analyzeSkeletalSegments();
-            break;
-        case 21:
-            analyzeDetailedRigidity();
-            break;
+                break;
+            case 21:
+                analyzeSkeletalSegments();
+                break;
+            case 22:
+                analyzeDetailedRigidity();
+                break;
             case 0:
                 cout << "Exiting..." << endl;
                 exit(0);
@@ -1197,4 +1227,58 @@ void analyzeDetailedRigidity() {
             cout << "    SOLUTION: Lower the rigidity threshold or check rigidity computation" << endl;
         }
     }
+}
+
+/**
+ * Unload the current mesh and clean up all related data
+ */
+void unloadMesh() {
+    cout << "\n=== UNLOAD MESH ===" << endl;
+
+    if (!g_mesh) {
+        cout << "No mesh is currently loaded." << endl;
+        return;
+    }
+
+    cout << "Unloading current mesh..." << endl;
+
+    // Clear all visualization including the mesh itself
+    if (g_root) {
+        g_root->removeAllChildren();
+    }
+
+    // Clean up segmentation data
+    if (g_segmentation) {
+        delete g_segmentation;
+        g_segmentation = nullptr;
+    }
+
+    // Clean up harmonics data
+    if (g_harmonics) {
+        delete g_harmonics;
+        g_harmonics = nullptr;
+    }
+
+    // Clean up mesh data
+    if (g_mesh) {
+        delete g_mesh;
+        g_mesh = nullptr;
+    }
+
+    // Clear all algorithm state
+    g_fps_samples.clear();
+    g_skeletal_segments.clear();
+    g_rigidity_scores.clear();
+    g_nonrigid_nodes.clear();
+
+    // Clear segmentation result
+    g_segmentation_result = PairwiseHarmonicsSegmentation::SegmentationResult();
+
+    // Force viewer to update and refresh
+    if (g_viewer) {
+        g_viewer->scheduleRedraw();
+        g_viewer->viewAll();
+    }
+
+    cout << "Mesh unloaded successfully. All data cleared." << endl;
 }
