@@ -689,6 +689,17 @@ PairwiseHarmonicsSegmentation::selectPartialSkeleton(const vector<SkeletalSegmen
     cout << "  Min nodes: " << params.minSkeletalNodes << endl;
 
     for (const auto& segment : segments) {
+
+        // SPECIAL FILTER: Skip problematic torso segments
+        if (segment.sourceIdx == -1 && segment.targetIdx == -1) {
+            if (segment.avgRigidity < 0.6) {
+                cout << "  Filtered out low-rigidity torso segment (rigidity: " << segment.avgRigidity << ")" << endl;
+                continue; // Skip this torso segment
+            }
+            cout << "  Including high-quality torso segment (rigidity: " << segment.avgRigidity << ")" << endl;
+        }
+
+
         bool meetsCriteria = (segment.quality >= params.minQualityThreshold &&
                              segment.length >= params.minSegmentLength &&
                              segment.nodes.size() >= params.minSkeletalNodes);
@@ -1178,10 +1189,27 @@ void PairwiseHarmonicsSegmentation::visualizeResults(
     }    // Visualize partial skeleton segments
     cout << "Visualizing " << result.partialSkeleton.size() << " skeletal segments..." << endl;
 
+    int validSegments = 0;
     for (int i = 0; i < result.partialSkeleton.size(); i++) {
         const auto& segment = result.partialSkeleton[i];
 
-        cout << "  Segment " << i << ": " << segment.nodes.size() << " nodes, avgRigidity=" << segment.avgRigidity << endl;
+        // Apply comprehensive filters to remove problematic segments
+        bool skipSegment = false;
+        string skipReason;
+
+        // Filter 1: Very low average rigidity (torso segments)
+        if (segment.avgRigidity < 0.60) {
+            skipSegment = true;
+            skipReason = "low rigidity (" + to_string(segment.avgRigidity) + ")";
+        }
+
+        if (skipSegment) {
+            cout << "  Skipping segment " << i << ": " << skipReason << endl;
+            continue;
+        }
+
+        validSegments++;
+        cout << "  Rendering segment " << i << ": " << segment.nodes.size() << " nodes, length=" << segment.length << endl;
 
         SoSeparator* segSep = new SoSeparator();
 
@@ -1234,6 +1262,8 @@ void PairwiseHarmonicsSegmentation::visualizeResults(
 
         root->addChild(segSep);
     }
+
+    cout << "Rendered " << validSegments << " valid segments (filtered out " << (result.partialSkeleton.size() - validSegments) << ")" << endl;
 
     // Visualize mesh components with different colors
     if (!result.meshComponents.empty()) {

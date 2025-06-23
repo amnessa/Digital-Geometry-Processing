@@ -622,12 +622,12 @@ void testEnhancedFPS() {
         if (i == 0) {
             color = Eigen::Vector3f(1.0f, 0.0f, 0.0f); // Red for first
         } else if (i == fps_samples.size() - 1) {
-            color = Eigen::Vector3f(0.0f, 0.0f, 1.0f); // Blue for last
+            color = Eigen::Vector3f(0.0f, 1.0f, 0.0f); // Green for last
         } else {
             color = Eigen::Vector3f(0.0f, 1.0f, 0.0f); // Green for others
         }
 
-        SoSeparator* pointViz = VisualizationUtils::createColoredSphere(pos, color, 0.015f);
+        SoSeparator* pointViz = VisualizationUtils::createColoredSphere(pos, color, 0.02f);
         g_root->addChild(pointViz);
     }
 
@@ -831,7 +831,7 @@ void visualizeMeshSegmentationClusters() {
     vector<Eigen::Vector3f> componentColors = {
         Eigen::Vector3f(1.0f, 0.0f, 0.0f), // Red
         Eigen::Vector3f(0.0f, 1.0f, 0.0f), // Green
-        Eigen::Vector3f(0.0f, 0.0f, 1.0f), // Blue
+        Eigen::Vector3f(0.0f, 0.0f, 0.0f), // White
         Eigen::Vector3f(1.0f, 1.0f, 0.0f), // Yellow
         Eigen::Vector3f(1.0f, 0.0f, 1.0f), // Magenta
         Eigen::Vector3f(0.0f, 1.0f, 1.0f), // Cyan
@@ -870,7 +870,7 @@ void visualizeMeshSegmentationClusters() {
                                          g_mesh->verts[vertexIdx]->coords[1],
                                          g_mesh->verts[vertexIdx]->coords[2]);
 
-                SoSeparator* pointViz = VisualizationUtils::createColoredSphere(vertexPos, color, 0.008f);
+                SoSeparator* pointViz = VisualizationUtils::createColoredSphere(vertexPos, color, 0.02f);
                 g_root->addChild(pointViz);
             }
         }
@@ -1044,7 +1044,7 @@ void visualizeSkeletalKMeansClustering() {
         int cluster = vertexClusters[v];
         Eigen::Vector3f color = clusterColors[cluster % clusterColors.size()];
 
-        SoSeparator* pointViz = VisualizationUtils::createColoredSphere(vertexPos, color, 0.006f);
+        SoSeparator* pointViz = VisualizationUtils::createColoredSphere(vertexPos, color, 0.02f);
         g_root->addChild(pointViz);
     }
 
@@ -1054,7 +1054,7 @@ void visualizeSkeletalKMeansClustering() {
         Eigen::Vector3f color = clusterColors[segIdx % clusterColors.size()];
 
         for (const auto& centroid : skeletalCentroids[segIdx]) {
-            SoSeparator* centroidViz = VisualizationUtils::createColoredSphere(centroid, color, 0.015f);
+            SoSeparator* centroidViz = VisualizationUtils::createColoredSphere(centroid, color, 0.02f);
             g_root->addChild(centroidViz);
         }
     }
@@ -1116,6 +1116,15 @@ void analyzeSkeletalSegments() {
 
     for (int i = 0; i < g_segmentation_result.partialSkeleton.size(); i++) {
         const auto& segment = g_segmentation_result.partialSkeleton[i];
+            // ADD THIS FILTER HERE TOO:
+        if (segment.avgRigidity < 0.6) {
+            cout << "\nSegment " << i << " (FILTERED - Low Rigidity):" << endl;
+            cout << "  Avg Rigidity: " << segment.avgRigidity << " (below threshold 0.6)" << endl;
+            cout << "  Length: " << segment.length << " (likely problematic long line)" << endl;
+            cout << "  Source FPS: " << segment.sourceIdx << ", Target FPS: " << segment.targetIdx << endl;
+            cout << "  ** This segment would be skipped in visualization **" << endl;
+            continue;
+    }
 
         cout << "\nSegment " << i << ":" << endl;
         cout << "  Nodes: " << segment.nodes.size() << endl;
