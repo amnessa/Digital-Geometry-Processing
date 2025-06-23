@@ -690,14 +690,6 @@ PairwiseHarmonicsSegmentation::selectPartialSkeleton(const vector<SkeletalSegmen
 
     for (const auto& segment : segments) {
 
-        // SPECIAL FILTER: Skip problematic torso segments
-        if (segment.sourceIdx == -1 && segment.targetIdx == -1) {
-            if (segment.avgRigidity < 0.6) {
-                cout << "  Filtered out low-rigidity torso segment (rigidity: " << segment.avgRigidity << ")" << endl;
-                continue; // Skip this torso segment
-            }
-            cout << "  Including high-quality torso segment (rigidity: " << segment.avgRigidity << ")" << endl;
-        }
 
 
         bool meetsCriteria = (segment.quality >= params.minQualityThreshold &&
@@ -1196,17 +1188,6 @@ void PairwiseHarmonicsSegmentation::visualizeResults(
         // Apply comprehensive filters to remove problematic segments
         bool skipSegment = false;
         string skipReason;
-
-        // Filter 1: Very low average rigidity (torso segments)
-        if (segment.avgRigidity < 0.60) {
-            skipSegment = true;
-            skipReason = "low rigidity (" + to_string(segment.avgRigidity) + ")";
-        }
-
-        if (skipSegment) {
-            cout << "  Skipping segment " << i << ": " << skipReason << endl;
-            continue;
-        }
 
         validSegments++;
         cout << "  Rendering segment " << i << ": " << segment.nodes.size() << " nodes, length=" << segment.length << endl;

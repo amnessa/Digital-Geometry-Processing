@@ -74,7 +74,7 @@ vector<bool> g_nonrigid_nodes;
 
 // Algorithm parameters (from the paper)
 const int DEFAULT_K = 50;           // Number of isocurves per harmonic field
-const double RIGIDITY_THRESHOLD = 0.9;  // Threshold for classifying rigid vs non-rigid nodes (significantly lowered for better junction detection)
+const double RIGIDITY_THRESHOLD = 0.85;  // Threshold for classifying rigid vs non-rigid nodes (significantly lowered for better junction detection)
 const int DEFAULT_FPS_SAMPLES = 25;     // Number of FPS samples for initial point generation (increased from 15)
 
 // Forward declarations
@@ -90,9 +90,11 @@ void testEnhancedDescriptors();
 void testMeshAnalysis();
 void visualizeMeshSegmentationClusters();
 void visualizeSkeletalKMeansClustering();
+void testHarmonicSurfaceSegmentation();
 void analyzeSkeletalSegments();
 void analyzeDetailedRigidity();
 void analyzeDetailedRigidity();
+void testHarmonicSurfaceSegmentation(); // Forward declare the new test function
 
 /**
  * Load a mesh file and initialize the segmentation system
@@ -324,7 +326,7 @@ void showMainMenu() {
     cout << "12. Visualize All Rigidity Points (Color-coded)" << endl;
     cout << "13. Interactive Rigidity Threshold Testing" << endl;    cout << "--- SEGMENTATION VISUALIZATION ---" << endl;
     cout << "19. Visualize Mesh Components (Colored Vertex Clusters)" << endl;
-    cout << "20. Skeletal K-means Clustering (Euclidean Distance)" << endl;
+    cout << "20. Harmonic Function Surface Segmentation" << endl;
     cout << "21. Analyze Skeletal Segments (Diagnostic)" << endl;
     cout << "22. Detailed Rigidity Analysis (Debug Cutting)" << endl;
     cout << "--- LIBIGL ENHANCED FEATURES ---" << endl;
@@ -926,23 +928,23 @@ void visualizeMeshSegmentationClusters() {
 }
 
 /**
- * Visualize mesh segmentation using skeletal-based K-means clustering
- * Generate points along skeletal segments as centroids, then cluster vertices by Euclidean distance
+ * Color the surface using the final skeleton with harmonic function competition
+ * This implements the correct approach described in the paper
  */
 void visualizeSkeletalKMeansClustering() {
-    if (!g_segmentation_result.success || g_segmentation_result.partialSkeleton.empty() || !g_mesh) {
+    if (!g_segmentation_result.success || g_segmentation_result.partialSkeleton.empty() || !g_mesh || !g_harmonics) {
         cout << "Error: Please run full segmentation first to generate skeletal segments!" << endl;
         cout << "Use option 7 to perform complete segmentation." << endl;
         return;
     }
 
-    cout << "\n=== SKELETAL K-MEANS CLUSTERING ===" << endl;
-    cout << "Using " << g_segmentation_result.partialSkeleton.size() << " skeletal segments as cluster centroids" << endl;
+    cout << "\n=== HARMONIC FUNCTION SURFACE SEGMENTATION ===" << endl;
+    cout << "Using " << g_segmentation_result.partialSkeleton.size() << " skeletal segments for surface competition" << endl;
 
     clearVisualization();
 
-    // Define colors for different clusters
-    vector<Eigen::Vector3f> clusterColors = {
+    // Define colors for different segments
+    vector<Eigen::Vector3f> segmentColors = {
         Eigen::Vector3f(1.0f, 0.0f, 0.0f), // Red
         Eigen::Vector3f(0.0f, 1.0f, 0.0f), // Green
         Eigen::Vector3f(0.0f, 0.0f, 1.0f), // Blue
@@ -955,117 +957,344 @@ void visualizeSkeletalKMeansClustering() {
         Eigen::Vector3f(1.0f, 0.5f, 0.5f)  // Light Red
     };
 
-    // Generate centroids along each skeletal segment
-    vector<vector<Eigen::Vector3d>> skeletalCentroids(g_segmentation_result.partialSkeleton.size());
+    // Step 0: SELECT THE BEST SKELETAL SEGMENTS (this is what's missing!)
+    cout << "Step 0: Selecting best skeletal segments using quality voting..." << endl;
+
+    // Score all segments by quality (average rigidity, length, etc.)
+    vector<pair<double, int>> segmentScores; // (score, segmentIndex)
 
     for (int segIdx = 0; segIdx < g_segmentation_result.partialSkeleton.size(); segIdx++) {
         const auto& segment = g_segmentation_result.partialSkeleton[segIdx];
 
-        if (segment.nodes.size() < 2) {
-            // If segment has only one node, use it as the single centroid
-            if (!segment.nodes.empty()) {
-                skeletalCentroids[segIdx].push_back(segment.nodes[0]);
-            }
+        // Skip invalid segments
+        if (segment.nodes.size() < 3 || segment.avgRigidity < 0.6) {
             continue;
         }
 
-        // Generate points along the skeletal curve/line
-        int numCentroidsPerSegment = max(3, (int)segment.nodes.size() / 2); // At least 3 centroids per segment
+        // Score based on: rigidity (higher = better tube) + length (longer = more important)
+        double rigidityScore = segment.avgRigidity;
+        double lengthScore = min(1.0, segment.length / 2.0); // Normalize length
+        double totalScore = rigidityScore * 0.7 + lengthScore * 0.3;
 
-        for (int i = 0; i < numCentroidsPerSegment; i++) {
-            double t = (double)i / (numCentroidsPerSegment - 1); // Parameter from 0 to 1
+        segmentScores.push_back({totalScore, segIdx});
+        cout << "  Segment " << segIdx << ": score=" << totalScore
+             << " (rigidity=" << rigidityScore << ", length=" << lengthScore << ")" << endl;
+    }
 
-            // Find the position along the skeletal path at parameter t
-            double totalLength = 0.0;
-            for (int j = 0; j < segment.nodes.size() - 1; j++) {
-                totalLength += (segment.nodes[j+1] - segment.nodes[j]).norm();
-            }
+    // Sort segments by score (best first)
+    sort(segmentScores.begin(), segmentScores.end(), greater<pair<double, int>>());
 
-            double targetLength = t * totalLength;
-            double currentLength = 0.0;
+    // GREEDY SELECTION: Pick best non-overlapping segments
+    cout << "  Performing greedy selection of non-overlapping segments..." << endl;
+    vector<int> selectedSegmentIndices;
+    set<int> usedFPSPoints;
 
-            for (int j = 0; j < segment.nodes.size() - 1; j++) {
-                double edgeLength = (segment.nodes[j+1] - segment.nodes[j]).norm();
+    for (const auto& [score, segIdx] : segmentScores) {
+        const auto& segment = g_segmentation_result.partialSkeleton[segIdx];
 
-                if (currentLength + edgeLength >= targetLength) {
-                    // Interpolate between nodes j and j+1
-                    double alpha = (targetLength - currentLength) / edgeLength;
-                    Eigen::Vector3d interpolatedPoint = segment.nodes[j] + alpha * (segment.nodes[j+1] - segment.nodes[j]);
-                    skeletalCentroids[segIdx].push_back(interpolatedPoint);
-                    break;
-                }
-                currentLength += edgeLength;
+        // Check if this segment overlaps with already selected ones
+        bool overlaps = (usedFPSPoints.count(segment.sourceIdx) > 0) ||
+                       (usedFPSPoints.count(segment.targetIdx) > 0);
+
+        if (!overlaps) {
+            selectedSegmentIndices.push_back(segIdx);
+            usedFPSPoints.insert(segment.sourceIdx);
+            usedFPSPoints.insert(segment.targetIdx);
+            cout << "    Selected segment " << segIdx << " (score=" << score << ")" << endl;
+        } else {
+            cout << "    Skipped segment " << segIdx << " (overlaps with selected segments)" << endl;
+        }
+    }
+
+    cout << "Selected " << selectedSegmentIndices.size() << " best non-overlapping segments" << endl;
+
+    // NOW use only the selected segments for rigidity analysis and segmentation
+    cout << "Step 1: Analyzing rigidity for SELECTED segments only..." << endl;
+
+    struct RigidSegment {
+        int originalSegmentIdx;
+        vector<Eigen::Vector3d> nodes;
+        double avgRigidity;
+        double startHarmonicValue;
+        double endHarmonicValue;
+        int sourceIdx, targetIdx;
+    };
+
+    vector<RigidSegment> rigidSegments;
+    const double RIGIDITY_SPLIT_THRESHOLD = 0.88; // Threshold for splitting at junctions
+
+    for (int segIdx : selectedSegmentIndices) {
+        const auto& segment = g_segmentation_result.partialSkeleton[segIdx];
+
+        if (segment.nodes.size() < 3 || segment.nodeRigidities.size() != segment.nodes.size()) {
+            // Can't analyze this segment, add as-is
+            RigidSegment rigidSeg;
+            rigidSeg.originalSegmentIdx = segIdx;
+            rigidSeg.nodes = segment.nodes;
+            rigidSeg.avgRigidity = segment.avgRigidity;
+            rigidSeg.startHarmonicValue = 0.0;
+            rigidSeg.endHarmonicValue = 1.0;
+            rigidSeg.sourceIdx = segment.sourceIdx;
+            rigidSeg.targetIdx = segment.targetIdx;
+            rigidSegments.push_back(rigidSeg);
+            continue;
+        }
+
+        // Find junction points (low rigidity nodes)
+        vector<int> junctionIndices;
+
+        // IMPROVED: Use relative rigidity drops instead of absolute threshold
+        cout << "    Analyzing rigidity profile for segment " << segIdx << ":" << endl;
+
+        // Find the minimum rigidity in this segment
+        double minRigidity = *min_element(segment.nodeRigidities.begin(), segment.nodeRigidities.end());
+        double maxRigidity = *max_element(segment.nodeRigidities.begin(), segment.nodeRigidities.end());
+        double rigidityRange = maxRigidity - minRigidity;
+
+        cout << "      Rigidity range: [" << minRigidity << ", " << maxRigidity << "] (span: " << rigidityRange << ")" << endl;
+
+        // Use relative threshold: nodes significantly below segment average
+        double avgRigidity = segment.avgRigidity;
+        double relativeThreshold = avgRigidity - 0.05; // 5% below average
+
+        for (int i = 1; i < segment.nodeRigidities.size() - 1; i++) { // Skip endpoints
+            double rigidity = segment.nodeRigidities[i];
+
+            // Junction criteria: either absolute low OR significant dip
+            bool isJunction = (rigidity < RIGIDITY_SPLIT_THRESHOLD) ||
+                             (rigidity < relativeThreshold && rigidityRange > 0.05);
+
+            if (isJunction) {
+                junctionIndices.push_back(i);
+                cout << "      Found junction at node " << i << " (rigidity: " << rigidity << ")" << endl;
             }
         }
 
-        cout << "  Segment " << segIdx << ": Generated " << skeletalCentroids[segIdx].size() << " centroids" << endl;
+        cout << "    Found " << junctionIndices.size() << " junction points: ";
+        for (int j : junctionIndices) cout << j << " ";
+        cout << endl;
+
+        // If no junctions found, add entire segment as rigid
+        if (junctionIndices.empty()) {
+            RigidSegment rigidSeg;
+            rigidSeg.originalSegmentIdx = segIdx;
+            rigidSeg.nodes = segment.nodes;
+            rigidSeg.avgRigidity = segment.avgRigidity;
+            rigidSeg.startHarmonicValue = 0.0;
+            rigidSeg.endHarmonicValue = 1.0;
+            rigidSeg.sourceIdx = segment.sourceIdx;
+            rigidSeg.targetIdx = segment.targetIdx;
+            rigidSegments.push_back(rigidSeg);
+            cout << "  Segment " << segIdx << ": No junctions found, keeping as rigid segment" << endl;
+            continue;
+        }
+
+        // Split at junction points
+        cout << "  Segment " << segIdx << ": Found " << junctionIndices.size() << " junctions, splitting..." << endl;
+
+        int startIdx = 0;
+        for (int junctionIdx : junctionIndices) {
+            if (junctionIdx - startIdx >= 3) { // Minimum 3 nodes for a meaningful segment
+                RigidSegment rigidSeg;
+                rigidSeg.originalSegmentIdx = segIdx;
+
+                // Extract nodes from startIdx to junctionIdx
+                for (int i = startIdx; i <= junctionIdx; i++) {
+                    rigidSeg.nodes.push_back(segment.nodes[i]);
+                }
+
+                // Calculate average rigidity for this sub-segment
+                double totalRigidity = 0.0;
+                for (int i = startIdx; i <= junctionIdx; i++) {
+                    totalRigidity += segment.nodeRigidities[i];
+                }
+                rigidSeg.avgRigidity = totalRigidity / (junctionIdx - startIdx + 1);
+
+                // Estimate harmonic values based on position along original segment
+                rigidSeg.startHarmonicValue = (double)startIdx / (segment.nodes.size() - 1);
+                rigidSeg.endHarmonicValue = (double)junctionIdx / (segment.nodes.size() - 1);
+                rigidSeg.sourceIdx = segment.sourceIdx;
+                rigidSeg.targetIdx = segment.targetIdx;
+
+                rigidSegments.push_back(rigidSeg);
+                cout << "    Created rigid sub-segment: nodes " << startIdx << "-" << junctionIdx
+                     << ", avg rigidity: " << rigidSeg.avgRigidity << endl;
+            }
+            startIdx = junctionIdx + 1;
+        }
+
+        // Add final segment if there are remaining nodes
+        if (startIdx < segment.nodes.size() - 1) {
+            RigidSegment rigidSeg;
+            rigidSeg.originalSegmentIdx = segIdx;
+
+            for (int i = startIdx; i < segment.nodes.size(); i++) {
+                rigidSeg.nodes.push_back(segment.nodes[i]);
+            }
+
+            double totalRigidity = 0.0;
+            for (int i = startIdx; i < segment.nodeRigidities.size(); i++) {
+                totalRigidity += segment.nodeRigidities[i];
+            }
+            rigidSeg.avgRigidity = totalRigidity / (segment.nodes.size() - startIdx);
+
+            rigidSeg.startHarmonicValue = (double)startIdx / (segment.nodes.size() - 1);
+            rigidSeg.endHarmonicValue = 1.0;
+            rigidSeg.sourceIdx = segment.sourceIdx;
+            rigidSeg.targetIdx = segment.targetIdx;
+
+            rigidSegments.push_back(rigidSeg);
+            cout << "    Created final rigid sub-segment: nodes " << startIdx << "-" << (segment.nodes.size()-1)
+                 << ", avg rigidity: " << rigidSeg.avgRigidity << endl;
+        }
     }
 
-    // Cluster each vertex to the closest skeletal centroid
-    vector<int> vertexClusters(g_mesh->verts.size());
-    vector<int> clusterSizes(g_segmentation_result.partialSkeleton.size(), 0);
+    cout << "Total rigid segments after splitting: " << rigidSegments.size() << "    ";
+
+    // Step 2: Cache harmonic fields for all original segments to avoid recomputation
+    cout << "Step 2: Caching harmonic fields for original skeletal segments..." << endl;
+
+    map<pair<int, int>, Eigen::VectorXd> cachedHarmonicFields;
+
+    // Cache harmonic fields for unique source-target pairs
+    for (const auto& rigidSeg : rigidSegments) {
+        pair<int, int> segmentPair = {rigidSeg.sourceIdx, rigidSeg.targetIdx};
+
+        if (cachedHarmonicFields.find(segmentPair) == cachedHarmonicFields.end()) {
+            cout << "  Computing harmonic field for segment pair (" << rigidSeg.sourceIdx << ", " << rigidSeg.targetIdx << ")" << endl;
+            Eigen::VectorXd harmonicField = g_harmonics->computePairwiseHarmonic(rigidSeg.sourceIdx, rigidSeg.targetIdx);
+
+            if (harmonicField.size() == g_mesh->verts.size()) {
+                cachedHarmonicFields[segmentPair] = harmonicField;
+            } else {
+                cout << "    Warning: Invalid harmonic field size for pair (" << rigidSeg.sourceIdx << ", " << rigidSeg.targetIdx << ")" << endl;
+            }
+        }
+    }
+
+    cout << "Cached " << cachedHarmonicFields.size() << " unique harmonic fields" << endl;
+
+    // Step 3: Assign vertices using the watershed principle from the paper
+    cout << "Step 3: Assigning vertices to segments using harmonic watershed competition..." << endl;
+
+    vector<int> vertexSegmentAssignment(g_mesh->verts.size(), -1);
+    vector<int> segmentVertexCounts(rigidSegments.size(), 0);
 
     for (int v = 0; v < g_mesh->verts.size(); v++) {
-        Eigen::Vector3d vertexPos(g_mesh->verts[v]->coords[0],
-                                 g_mesh->verts[v]->coords[1],
-                                 g_mesh->verts[v]->coords[2]);
+        double bestScore = -1.0;
+        int bestSegment = -1;
 
-        double minDistance = 1e10;
-        int closestCluster = 0;
+        // For each rigid segment, check if this vertex should belong to it
+        for (int rigidSegIdx = 0; rigidSegIdx < rigidSegments.size(); rigidSegIdx++) {
+            const auto& rigidSeg = rigidSegments[rigidSegIdx];
 
-        // Find the closest skeletal centroid across all segments
-        for (int segIdx = 0; segIdx < skeletalCentroids.size(); segIdx++) {
-            for (const auto& centroid : skeletalCentroids[segIdx]) {
-                double distance = (vertexPos - centroid).norm();
-                if (distance < minDistance) {
-                    minDistance = distance;
-                    closestCluster = segIdx;
+            // Get the cached harmonic field for this segment's original pair
+            pair<int, int> segmentPair = {rigidSeg.sourceIdx, rigidSeg.targetIdx};
+            auto harmonicIt = cachedHarmonicFields.find(segmentPair);
+
+            if (harmonicIt == cachedHarmonicFields.end()) {
+                continue; // No valid harmonic field for this pair
+            }
+
+            const Eigen::VectorXd& harmonicField = harmonicIt->second;
+            double harmonicValue = harmonicField(v);
+
+            // Key insight: Use harmonic value range to determine segment ownership
+            // A vertex belongs to a rigid segment if its harmonic value falls within that segment's range
+            if (harmonicValue >= rigidSeg.startHarmonicValue && harmonicValue <= rigidSeg.endHarmonicValue) {
+
+                // Calculate how "central" this vertex is within the rigid segment's harmonic range
+                double rangeSize = rigidSeg.endHarmonicValue - rigidSeg.startHarmonicValue;
+                if (rangeSize < 1e-6) rangeSize = 1e-6; // Avoid division by zero
+
+                double normalizedPos = (harmonicValue - rigidSeg.startHarmonicValue) / rangeSize;
+
+                // Score based on: 1) how well-centered in the range, 2) segment's rigidity
+                // Higher rigidity = more tube-like = more confident assignment
+                double centralityScore = 1.0 - abs(normalizedPos - 0.5) * 2.0; // Peak at center (0.5)
+                double rigidityWeight = rigidSeg.avgRigidity;
+                double score = centralityScore * rigidityWeight;
+
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestSegment = rigidSegIdx;
                 }
             }
         }
 
-        vertexClusters[v] = closestCluster;
-        clusterSizes[closestCluster]++;
+        // If no rigid segment claimed this vertex, use fallback strategy
+        if (bestSegment == -1) {
+            // Fallback: Find which rigid segment this vertex is closest to in harmonic space
+            double minHarmonicDistance = 1e10;
+            Eigen::Vector3d vertexPos(g_mesh->verts[v]->coords[0], g_mesh->verts[v]->coords[1], g_mesh->verts[v]->coords[2]);
+
+            for (int rigidSegIdx = 0; rigidSegIdx < rigidSegments.size(); rigidSegIdx++) {
+                const auto& rigidSeg = rigidSegments[rigidSegIdx];
+
+                // Get harmonic value for this vertex from this segment's field
+                pair<int, int> segmentPair = {rigidSeg.sourceIdx, rigidSeg.targetIdx};
+                auto harmonicIt = cachedHarmonicFields.find(segmentPair);
+
+                if (harmonicIt != cachedHarmonicFields.end()) {
+                    const Eigen::VectorXd& harmonicField = harmonicIt->second;
+                    double harmonicValue = harmonicField(v);
+
+                    // Distance to this segment's harmonic range
+                    double distanceToRange = 0.0;
+                    if (harmonicValue < rigidSeg.startHarmonicValue) {
+                        distanceToRange = rigidSeg.startHarmonicValue - harmonicValue;
+                    } else if (harmonicValue > rigidSeg.endHarmonicValue) {
+                        distanceToRange = harmonicValue - rigidSeg.endHarmonicValue;
+                    }
+                      if (distanceToRange < minHarmonicDistance) {
+                        minHarmonicDistance = distanceToRange;
+                        bestSegment = rigidSegIdx;
+                    }
+                }
+            }
+        }
+
+        vertexSegmentAssignment[v] = bestSegment;
+        if (bestSegment >= 0) {
+            segmentVertexCounts[bestSegment]++;
+        }
     }
 
-    // Print cluster statistics
-    cout << "Cluster sizes:" << endl;
-    for (int i = 0; i < clusterSizes.size(); i++) {
-        cout << "  Cluster " << i << ": " << clusterSizes[i] << " vertices" << endl;
+    // Step 3: Visualize the results
+    cout << "Step 3: Visualizing segmentation results..." << endl;
+
+    // Print segment statistics
+    for (int i = 0; i < rigidSegments.size(); i++) {
+        cout << "  Rigid Segment " << i << " (from original segment " << rigidSegments[i].originalSegmentIdx << "): "
+             << segmentVertexCounts[i] << " vertices, avg rigidity: " << rigidSegments[i].avgRigidity << endl;
     }
 
-    // Visualize vertices colored by cluster
-    cout << "Rendering colored spheres for each cluster..." << endl;
-    for (int v = 0; v < g_mesh->verts.size(); v += 12) { // Downsample for performance
-        Eigen::Vector3d vertexPos(g_mesh->verts[v]->coords[0],
-                                 g_mesh->verts[v]->coords[1],
-                                 g_mesh->verts[v]->coords[2]);
+    // Visualize vertices colored by segment assignment
+    cout << "Rendering colored mesh vertices..." << endl;
+    for (int v = 0; v < g_mesh->verts.size(); v += 20) { // More aggressive downsampling
+        Eigen::Vector3d vertexPos(g_mesh->verts[v]->coords[0], g_mesh->verts[v]->coords[1], g_mesh->verts[v]->coords[2]);
 
-        int cluster = vertexClusters[v];
-        Eigen::Vector3f color = clusterColors[cluster % clusterColors.size()];
+        int segmentIdx = vertexSegmentAssignment[v];
+        Eigen::Vector3f color;
 
-        SoSeparator* pointViz = VisualizationUtils::createColoredSphere(vertexPos, color, 0.02f);
+        if (segmentIdx >= 0 && segmentIdx < rigidSegments.size()) {
+            color = segmentColors[segmentIdx % segmentColors.size()];
+        } else {
+            color = Eigen::Vector3f(0.5f, 0.5f, 0.5f); // Gray for unassigned
+        }
+
+        SoSeparator* pointViz = VisualizationUtils::createColoredSphere(vertexPos, color, 0.015f);
         g_root->addChild(pointViz);
     }
 
-    // Visualize the skeletal centroids as larger spheres
-    cout << "Rendering skeletal centroids..." << endl;
-    for (int segIdx = 0; segIdx < skeletalCentroids.size(); segIdx++) {
-        Eigen::Vector3f color = clusterColors[segIdx % clusterColors.size()];
+    // Visualize the rigid skeletal segments as lines
+    cout << "Rendering rigid skeletal segments..." << endl;
+    for (int rigidSegIdx = 0; rigidSegIdx < rigidSegments.size(); rigidSegIdx++) {
+        const auto& rigidSeg = rigidSegments[rigidSegIdx];
 
-        for (const auto& centroid : skeletalCentroids[segIdx]) {
-            SoSeparator* centroidViz = VisualizationUtils::createColoredSphere(centroid, color, 0.02f);
-            g_root->addChild(centroidViz);
-        }
-    }
+        if (rigidSeg.nodes.size() < 2) continue;
 
-    // Also visualize the original skeletal segments as lines
-    cout << "Rendering skeletal segments..." << endl;
-    for (int segIdx = 0; segIdx < g_segmentation_result.partialSkeleton.size(); segIdx++) {
-        const auto& segment = g_segmentation_result.partialSkeleton[segIdx];
-        if (segment.nodes.size() < 2) continue;
-
-        Eigen::Vector3f color = clusterColors[segIdx % clusterColors.size()];
+        Eigen::Vector3f color = segmentColors[rigidSegIdx % segmentColors.size()];
 
         SoSeparator* lineSep = new SoSeparator();
         SoMaterial* mat = new SoMaterial();
@@ -1074,32 +1303,45 @@ void visualizeSkeletalKMeansClustering() {
         lineSep->addChild(mat);
 
         SoCoordinate3* coords = new SoCoordinate3();
-        coords->point.setNum(segment.nodes.size());
+        coords->point.setNum(rigidSeg.nodes.size());
 
-        for (int i = 0; i < segment.nodes.size(); i++) {
-            coords->point.set1Value(i, segment.nodes[i][0], segment.nodes[i][1], segment.nodes[i][2]);
+        for (int i = 0; i < rigidSeg.nodes.size(); i++) {
+            coords->point.set1Value(i, rigidSeg.nodes[i][0], rigidSeg.nodes[i][1], rigidSeg.nodes[i][2]);
         }
         lineSep->addChild(coords);
 
         SoIndexedLineSet* lineSet = new SoIndexedLineSet();
-        for (int i = 0; i < segment.nodes.size() - 1; i++) {
+        for (int i = 0; i < rigidSeg.nodes.size() - 1; i++) {
             lineSet->coordIndex.set1Value(i * 3, i);
             lineSet->coordIndex.set1Value(i * 3 + 1, i + 1);
             lineSet->coordIndex.set1Value(i * 3 + 2, -1);
         }
         lineSep->addChild(lineSet);
         g_root->addChild(lineSep);
+
+        // Add spheres at segment endpoints to show rigid parts clearly
+        if (!rigidSeg.nodes.empty()) {
+            SoSeparator* startSphere = VisualizationUtils::createColoredSphere(rigidSeg.nodes[0], color, 0.03f);
+            g_root->addChild(startSphere);
+
+            SoSeparator* endSphere = VisualizationUtils::createColoredSphere(rigidSeg.nodes.back(), color, 0.03f);
+            g_root->addChild(endSphere);
+        }
     }
 
     g_viewer->scheduleRedraw();
-    g_viewer->viewAll();
-
-    cout << "\n=== SKELETAL K-MEANS CLUSTERING COMPLETE ===" << endl;
-    cout << "-> Used " << g_segmentation_result.partialSkeleton.size() << " skeletal segments as cluster bases" << endl;
-    cout << "-> Clustered vertices using Euclidean distance to skeletal centroids" << endl;
-    cout << "-> Small spheres: vertices colored by cluster assignment" << endl;
-    cout << "-> Large spheres: skeletal centroids used for clustering" << endl;
-    cout << "-> Colored lines: original skeletal segments" << endl;
+    g_viewer->viewAll();    cout << "\n=== HARMONIC FUNCTION SURFACE SEGMENTATION COMPLETE ===" << endl;
+    cout << "-> Split " << g_segmentation_result.partialSkeleton.size() << " original segments into "
+         << rigidSegments.size() << " rigid parts using rigidity analysis" << endl;
+    cout << "-> Assigned surface vertices using harmonic function competition" << endl;
+    cout << "-> Each color represents a distinct rigid part of the model" << endl;
+    cout << "-> Thick lines: rigid skeletal segments" << endl;
+    cout << "-> Large spheres: segment endpoints" << endl;
+    cout << "-> Small spheres: surface vertices colored by segment assignment" << endl;
+    cout << "\nKEY INSIGHT: Surface vertices are colored based on which skeletal segment" << endl;
+    cout << "they belong to via harmonic function 'competition'. This implements the" << endl;
+    cout << "watershed principle from the paper - vertices flow to the skeletal part" << endl;
+    cout << "they are most connected to along the surface geometry." << endl;
 }
 
 /**
@@ -1290,4 +1532,85 @@ void unloadMesh() {
     }
 
     cout << "Mesh unloaded successfully. All data cleared." << endl;
+}
+
+/**
+ * Test function to debug and analyze the harmonic-based surface segmentation approach
+ */
+void testHarmonicSurfaceSegmentation() {
+    if (!g_segmentation_result.success || g_segmentation_result.partialSkeleton.empty() || !g_mesh || !g_harmonics) {
+        cout << "Error: Please run full segmentation first!" << endl;
+        return;
+    }
+
+    cout << "\n=== TESTING HARMONIC SURFACE SEGMENTATION ===" << endl;
+
+    // Test a single segment to understand the data
+    if (!g_segmentation_result.partialSkeleton.empty()) {
+        const auto& testSegment = g_segmentation_result.partialSkeleton[0];
+
+        cout << "Testing segment 0:" << endl;
+        cout << "  Source FPS: " << testSegment.sourceIdx << ", Target FPS: " << testSegment.targetIdx << endl;
+        cout << "  Nodes: " << testSegment.nodes.size() << endl;
+        cout << "  Avg Rigidity: " << testSegment.avgRigidity << endl;
+        cout << "  Length: " << testSegment.length << endl;
+
+        // Compute harmonic field for this segment
+        cout << "Computing harmonic field..." << endl;
+        Eigen::VectorXd harmonicField = g_harmonics->computePairwiseHarmonic(testSegment.sourceIdx, testSegment.targetIdx);
+
+        if (harmonicField.size() == g_mesh->verts.size()) {
+            double minVal = harmonicField.minCoeff();
+            double maxVal = harmonicField.maxCoeff();
+            cout << "  Harmonic field range: [" << minVal << ", " << maxVal << "]" << endl;
+
+            // Analyze rigidity distribution
+            if (testSegment.nodeRigidities.size() == testSegment.nodes.size()) {
+                cout << "  Rigidity analysis:" << endl;
+                for (int i = 0; i < min(10, (int)testSegment.nodeRigidities.size()); i++) {
+                    double rigidity = testSegment.nodeRigidities[i];
+                    double harmonicValue = (double)i / (testSegment.nodes.size() - 1);
+                    cout << "    Node " << i << ": rigidity=" << rigidity << ", estimated harmonic=" << harmonicValue << endl;
+                }
+
+                // Find potential junction points (low rigidity)
+                vector<int> junctionPoints;
+                const double threshold = 0.85;
+                for (int i = 0; i < testSegment.nodeRigidities.size(); i++) {
+                    if (testSegment.nodeRigidities[i] < threshold) {
+                        junctionPoints.push_back(i);
+                    }
+                }
+
+                cout << "  Junction points (rigidity < " << threshold << "): ";
+                for (int jp : junctionPoints) {
+                    cout << jp << " ";
+                }
+                cout << endl;
+
+                if (junctionPoints.size() > 0) {
+                    cout << "  This segment should be split into " << (junctionPoints.size() + 1) << " rigid parts" << endl;
+                } else {
+                    cout << "  This segment is uniformly rigid (no junctions detected)" << endl;
+                }
+            }
+
+            // Count vertices in different harmonic ranges
+            int range1 = 0, range2 = 0, range3 = 0; // 0-0.33, 0.33-0.66, 0.66-1.0
+            for (int v = 0; v < harmonicField.size(); v++) {
+                double normalizedVal = (harmonicField(v) - minVal) / (maxVal - minVal);
+                if (normalizedVal < 0.33) range1++;
+                else if (normalizedVal < 0.66) range2++;
+                else range3++;
+            }
+
+            cout << "  Vertex distribution in harmonic ranges:" << endl;
+            cout << "    Range [0.0-0.33]: " << range1 << " vertices" << endl;
+            cout << "    Range [0.33-0.66]: " << range2 << " vertices" << endl;
+            cout << "    Range [0.66-1.0]: " << range3 << " vertices" << endl;
+
+        } else {
+            cout << "  ERROR: Harmonic field size mismatch!" << endl;
+        }
+    }
 }
