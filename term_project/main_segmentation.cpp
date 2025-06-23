@@ -958,58 +958,22 @@ void visualizeSkeletalKMeansClustering() {
     };
 
     // Step 0: SELECT THE BEST SKELETAL SEGMENTS (this is what's missing!)
-    cout << "Step 0: Selecting best skeletal segments using quality voting..." << endl;
+    cout << "Step 0: Using ALL skeletal segments from the main segmentation..." << endl;
 
-    // Score all segments by quality (average rigidity, length, etc.)
-    vector<pair<double, int>> segmentScores; // (score, segmentIndex)
-
-    for (int segIdx = 0; segIdx < g_segmentation_result.partialSkeleton.size(); segIdx++) {
-        const auto& segment = g_segmentation_result.partialSkeleton[segIdx];
-
-        // Skip invalid segments
-        if (segment.nodes.size() < 3 || segment.avgRigidity < 0.6) {
-            continue;
-        }
-
-        // Score based on: rigidity (higher = better tube) + length (longer = more important)
-        double rigidityScore = segment.avgRigidity;
-        double lengthScore = min(1.0, segment.length / 2.0); // Normalize length
-        double totalScore = rigidityScore * 0.7 + lengthScore * 0.3;
-
-        segmentScores.push_back({totalScore, segIdx});
-        cout << "  Segment " << segIdx << ": score=" << totalScore
-             << " (rigidity=" << rigidityScore << ", length=" << lengthScore << ")" << endl;
-    }
-
-    // Sort segments by score (best first)
-    sort(segmentScores.begin(), segmentScores.end(), greater<pair<double, int>>());
-
-    // GREEDY SELECTION: Pick best non-overlapping segments
-    cout << "  Performing greedy selection of non-overlapping segments..." << endl;
+    // --- START OF REPLACEMENT ---
+    // Create a simple list of all segment indices from the segmentation result.
+    // We are removing the extra greedy selection to ensure we use the exact
+    // skeleton (including torso parts) that the main algorithm generated.
     vector<int> selectedSegmentIndices;
-    set<int> usedFPSPoints;
-
-    for (const auto& [score, segIdx] : segmentScores) {
-        const auto& segment = g_segmentation_result.partialSkeleton[segIdx];
-
-        // Check if this segment overlaps with already selected ones
-        bool overlaps = (usedFPSPoints.count(segment.sourceIdx) > 0) ||
-                       (usedFPSPoints.count(segment.targetIdx) > 0);
-
-        if (!overlaps) {
-            selectedSegmentIndices.push_back(segIdx);
-            usedFPSPoints.insert(segment.sourceIdx);
-            usedFPSPoints.insert(segment.targetIdx);
-            cout << "    Selected segment " << segIdx << " (score=" << score << ")" << endl;
-        } else {
-            cout << "    Skipped segment " << segIdx << " (overlaps with selected segments)" << endl;
-        }
+    for (int i = 0; i < g_segmentation_result.partialSkeleton.size(); ++i) {
+        selectedSegmentIndices.push_back(i);
     }
+    // --- END OF REPLACEMENT ---
 
-    cout << "Selected " << selectedSegmentIndices.size() << " best non-overlapping segments" << endl;
+    cout << "Using all " << selectedSegmentIndices.size() << " segments for rigidity analysis." << endl;
 
     // NOW use only the selected segments for rigidity analysis and segmentation
-    cout << "Step 1: Analyzing rigidity for SELECTED segments only..." << endl;
+    cout << "Step 1: Analyzing rigidity for ALL segments..." << endl;
 
     struct RigidSegment {
         int originalSegmentIdx;
@@ -1090,58 +1054,49 @@ void visualizeSkeletalKMeansClustering() {
         }
 
         // --- START OF REPLACEMENT ---
-        // Split at junction points using a more robust method
+        // Robustly split the segment at junction points.
         cout << "  Segment " << segIdx << ": Found " << junctionIndices.size() << " junctions, splitting..." << endl;
+        int lastCut = -1;
+        junctionIndices.push_back(segment.nodes.size()); // Add a virtual junction at the end
 
-        vector<bool> isJunctionNode(segment.nodes.size(), false);
-        for (int idx : junctionIndices) {
-            if (idx >= 0 && idx < isJunctionNode.size()) {
-                isJunctionNode[idx] = true;
-            }
-        }
+        for (int cutPoint : junctionIndices) {
+            int startNode = lastCut + 1;
+            int endNode = cutPoint - 1;
 
-        int currentSegmentStart = 0;
-        for (int i = 0; i < segment.nodes.size(); ++i) {
-            // A rigid part ends when we hit a junction or the end of the polyline
-            if (isJunctionNode[i] || i == segment.nodes.size() - 1) {
-                // The rigid part is from currentSegmentStart up to the node before the junction.
-                int currentSegmentEnd = isJunctionNode[i] ? i - 1 : i;
+            // Ensure the segment is valid and has at least 1 node.
+            if (endNode >= startNode) {
+                RigidSegment rigidSeg;
+                rigidSeg.originalSegmentIdx = segIdx;
 
-                // Ensure the segment is valid and has at least 2 nodes.
-                if (currentSegmentEnd >= currentSegmentStart && (currentSegmentEnd - currentSegmentStart + 1) >= 2) {
-                    RigidSegment rigidSeg;
-                    rigidSeg.originalSegmentIdx = segIdx;
-
-                    // Extract nodes for this new rigid part
-                    for (int n = currentSegmentStart; n <= currentSegmentEnd; ++n) {
-                        rigidSeg.nodes.push_back(segment.nodes[n]);
-                    }
-
-                    // Calculate average rigidity for this sub-segment
-                    double totalRigidity = 0.0;
-                    for (int n = currentSegmentStart; n <= currentSegmentEnd; ++n) {
-                        totalRigidity += segment.nodeRigidities[n];
-                    }
-                    rigidSeg.avgRigidity = totalRigidity / rigidSeg.nodes.size();
-
-                    // Estimate harmonic values based on position along original segment
-                    rigidSeg.startHarmonicValue = (double)currentSegmentStart / (segment.nodes.size() - 1);
-                    rigidSeg.endHarmonicValue = (double)currentSegmentEnd / (segment.nodes.size() - 1);
-                    rigidSeg.sourceIdx = segment.sourceIdx;
-                    rigidSeg.targetIdx = segment.targetIdx;
-
-                    rigidSegments.push_back(rigidSeg);
-                    cout << "    Created rigid sub-segment: nodes " << currentSegmentStart << "-" << currentSegmentEnd
-                         << ", avg rigidity: " << rigidSeg.avgRigidity << endl;
+                // Extract nodes and calculate average rigidity for this new rigid part
+                double totalRigidity = 0;
+                for (int n = startNode; n <= endNode; ++n) {
+                    rigidSeg.nodes.push_back(segment.nodes[n]);
+                    totalRigidity += segment.nodeRigidities[n];
                 }
-                // The next potential rigid part starts after this junction.
-                currentSegmentStart = i + 1;
+                rigidSeg.avgRigidity = totalRigidity / rigidSeg.nodes.size();
+
+                // Set harmonic range and source/target
+                if (segment.nodes.size() > 1) {
+                    rigidSeg.startHarmonicValue = (double)startNode / (segment.nodes.size() - 1);
+                    rigidSeg.endHarmonicValue = (double)endNode / (segment.nodes.size() - 1);
+                } else {
+                    rigidSeg.startHarmonicValue = 0.0;
+                    rigidSeg.endHarmonicValue = 1.0;
+                }
+                rigidSeg.sourceIdx = segment.sourceIdx;
+                rigidSeg.targetIdx = segment.targetIdx;
+
+                rigidSegments.push_back(rigidSeg);
+                cout << "    Created rigid sub-segment from node " << startNode
+                     << " to " << endNode << " (avg rigidity: " << rigidSeg.avgRigidity << ")" << endl;
             }
+            lastCut = cutPoint;
         }
         // --- END OF REPLACEMENT ---
     }
 
-    cout << "Total rigid segments after splitting: " << rigidSegments.size() << "    ";
+    cout << "Total rigid segments after splitting: " << rigidSegments.size() << endl;
 
     // Step 2: Cache harmonic fields for all original segments to avoid recomputation
     cout << "Step 2: Caching harmonic fields for original skeletal segments..." << endl;
@@ -1150,6 +1105,10 @@ void visualizeSkeletalKMeansClustering() {
 
     // Cache harmonic fields for unique source-target pairs
     for (const auto& rigidSeg : rigidSegments) {
+
+        if (rigidSeg.sourceIdx < 0 || rigidSeg.targetIdx < 0) {
+            continue; // Skip segments for torso
+        }
         pair<int, int> segmentPair = {rigidSeg.sourceIdx, rigidSeg.targetIdx};
 
         if (cachedHarmonicFields.find(segmentPair) == cachedHarmonicFields.end()) {
@@ -1166,33 +1125,32 @@ void visualizeSkeletalKMeansClustering() {
 
     cout << "Cached " << cachedHarmonicFields.size() << " unique harmonic fields" << endl;
 
-    // Step 3: Assign vertices using a more robust watershed competition
-    cout << "Step 3: Assigning vertices to segments using harmonic watershed competition..." << endl;
+    // Step 3: Hybrid assignment using a two-pass strategy
+    cout << "Step 3: Assigning vertices using hybrid watershed competition..." << endl;
 
     vector<int> vertexSegmentAssignment(g_mesh->verts.size(), -1);
     vector<int> segmentVertexCounts(rigidSegments.size(), 0);
 
+    // Pass 1: High-confidence assignment for limb segments using harmonic distance
+    cout << "  Pass 1: Assigning clear limb vertices via harmonic competition..." << endl;
+    const double HARMONIC_CONFIDENCE_THRESHOLD = 0.05; // Vertex must be very close to a segment's harmonic range
+
     for (int v = 0; v < g_mesh->verts.size(); v++) {
         double minDistance = numeric_limits<double>::max();
         int bestSegment = -1;
-        double bestRigidity = 0.0; // Used for tie-breaking
+        double bestRigidity = 0.0;
 
-        // For each vertex, find the rigid segment it is "closest" to in harmonic space
         for (int rigidSegIdx = 0; rigidSegIdx < rigidSegments.size(); rigidSegIdx++) {
             const auto& rigidSeg = rigidSegments[rigidSegIdx];
+            if (rigidSeg.sourceIdx == -1) continue; // Skip torso segments in this pass
 
-            // Get the cached harmonic field for this segment's original pair
             pair<int, int> segmentPair = {rigidSeg.sourceIdx, rigidSeg.targetIdx};
             auto harmonicIt = cachedHarmonicFields.find(segmentPair);
-
-            if (harmonicIt == cachedHarmonicFields.end()) {
-                continue; // No valid harmonic field for this pair
-            }
+            if (harmonicIt == cachedHarmonicFields.end()) continue;
 
             const Eigen::VectorXd& harmonicField = harmonicIt->second;
             double harmonicValue = harmonicField(v);
 
-            // Calculate the distance from the vertex's harmonic value to this segment's range
             double distanceToRange = 0.0;
             if (harmonicValue < rigidSeg.startHarmonicValue) {
                 distanceToRange = rigidSeg.startHarmonicValue - harmonicValue;
@@ -1200,16 +1158,11 @@ void visualizeSkeletalKMeansClustering() {
                 distanceToRange = harmonicValue - rigidSeg.endHarmonicValue;
             }
 
-            // --- NEW TIE-BREAKING LOGIC ---
-            // If this segment is a better fit (closer distance), it becomes the new best.
             if (distanceToRange < minDistance) {
                 minDistance = distanceToRange;
                 bestSegment = rigidSegIdx;
                 bestRigidity = rigidSeg.avgRigidity;
-            }
-            // If it's just as close (i.e., distance is 0), break the tie
-            // by choosing the segment with the highest average rigidity.
-            else if (abs(distanceToRange - minDistance) < 1e-9) { // Floating point comparison
+            } else if (abs(distanceToRange - minDistance) < 1e-9) {
                 if (rigidSeg.avgRigidity > bestRigidity) {
                     bestSegment = rigidSegIdx;
                     bestRigidity = rigidSeg.avgRigidity;
@@ -1217,11 +1170,48 @@ void visualizeSkeletalKMeansClustering() {
             }
         }
 
-        vertexSegmentAssignment[v] = bestSegment;
-        if (bestSegment >= 0) {
-            segmentVertexCounts[bestSegment]++;
+        // Only assign if the vertex is a very clear, unambiguous fit for a limb
+        if (bestSegment != -1 && minDistance < HARMONIC_CONFIDENCE_THRESHOLD) {
+            vertexSegmentAssignment[v] = bestSegment;
         }
     }
+
+    // Pass 2: Assign all remaining vertices to the geometrically closest rigid segment (handles torso/junctions)
+    cout << "  Pass 2: Assigning remaining torso/junction vertices via Euclidean distance..." << endl;
+    for (int v = 0; v < g_mesh->verts.size(); v++) {
+        if (vertexSegmentAssignment[v] != -1) continue; // Skip already-assigned vertices
+
+        double minEuclideanDist = numeric_limits<double>::max();
+        int bestSegment = -1;
+        Eigen::Vector3d vertPos(g_mesh->verts[v]->coords[0], g_mesh->verts[v]->coords[1], g_mesh->verts[v]->coords[2]);
+
+        for (int rigidSegIdx = 0; rigidSegIdx < rigidSegments.size(); rigidSegIdx++) {
+            const auto& rigidSeg = rigidSegments[rigidSegIdx];
+            if (rigidSeg.nodes.empty()) continue;
+
+            // Find the closest point on this segment's polyline to the vertex
+            for (const auto& nodePos : rigidSeg.nodes) {
+                double dist = (vertPos - nodePos).norm();
+                if (dist < minEuclideanDist) {
+                    minEuclideanDist = dist;
+                    bestSegment = rigidSegIdx;
+                }
+            }
+        }
+
+        if (bestSegment != -1) {
+            vertexSegmentAssignment[v] = bestSegment;
+        }
+    }
+
+    // Recalculate final vertex counts for each segment
+    for(int i = 0; i < rigidSegments.size(); ++i) segmentVertexCounts[i] = 0;
+    for(int v = 0; v < g_mesh->verts.size(); ++v) {
+        if(vertexSegmentAssignment[v] != -1) {
+            segmentVertexCounts[vertexSegmentAssignment[v]]++;
+        }
+    }
+    // --- END OF REPLACEMENT ---
 
     // Step 4: Visualize the results
     cout << "Step 4: Visualizing segmentation results..." << endl;

@@ -560,7 +560,7 @@ PairwiseHarmonicsSegmentation::extractCompleteLimbSegments(
             // Find last significant rigidity drop (working backwards)
             for (int i = pathRigidities.size() - 2; i >= 0; i--) {
                 if (pathRigidities[i] < junctionThreshold) {
-                    junctionIdx = i;
+                    junctionIdx = i + 1;
                     break;
                 }
             }
@@ -784,65 +784,64 @@ bool PairwiseHarmonicsSegmentation::checkSegmentOverlap(
     const SkeletalSegment& seg1, const SkeletalSegment& seg2) {
 
     // Method 1: Check FPS endpoint sharing (CRITICAL OVERLAP)
-    // Segments that share FPS endpoints definitely represent the same anatomical structure
+    // This is the most reliable sign of overlap.
     bool shareEndpoints = (seg1.sourceIdx == seg2.sourceIdx) ||
                          (seg1.sourceIdx == seg2.targetIdx) ||
                          (seg1.targetIdx == seg2.sourceIdx) ||
                          (seg1.targetIdx == seg2.targetIdx);
 
     if (shareEndpoints) {
-        return true; // Definite overlap
+        return true; // Definite overlap, no further checks needed.
     }
 
-    // Method 2: Spatial proximity check (AGGRESSIVE THRESHOLD)
-    // Use parameters-based threshold for better control
-    double overlapThreshold = params.overlapSpatialThreshold; // Much tighter than before
+    // --- START OF REPLACEMENT ---
+    // REVISED, LESS AGGRESSIVE OVERLAP LOGIC:
+    // Two segments are considered overlapping only if they are very similar
+    // in BOTH position AND orientation. This prevents the removal of distinct
+    // anatomical parts (like a leg) that might share a path with a longer
+    // segment (like a back-to-leg path) but have a different overall direction.
+
+    // Step 1: Check for significant spatial proximity.
+    double overlapThreshold = params.overlapSpatialThreshold;
     int overlapCount = 0;
-    int totalSamples = std::max(5, (int)std::min(seg1.nodes.size(), seg2.nodes.size())); // Ensure meaningful sampling
+    // Use a fixed number of samples for consistent comparison.
+    int totalSamples = 10;
 
-    // Sample nodes along both segments and check for proximity
     for (int i = 0; i < totalSamples; i++) {
-        // Get corresponding positions along both segments
-        double ratio = double(i) / double(totalSamples - 1);
+        double ratio = (i + 0.5) / totalSamples; // Sample from middle of sub-segments
 
-        // Interpolate position on seg1
         int idx1 = min(int(ratio * (seg1.nodes.size() - 1)), (int)seg1.nodes.size() - 1);
         Eigen::Vector3d pos1 = seg1.nodes[idx1];
 
-        // Interpolate position on seg2
-        int idx2 = min(int(ratio * (seg2.nodes.size() - 1)), (int)seg2.nodes.size() - 1);
-        Eigen::Vector3d pos2 = seg2.nodes[idx2];
+        // Find the closest point on the other segment to this sample point.
+        double minDistance = 1e10;
+        for (const auto& node2 : seg2.nodes) {
+            minDistance = min(minDistance, (pos1 - node2).norm());
+        }
 
-        double distance = (pos1 - pos2).norm();
-        if (distance < overlapThreshold) {
+        if (minDistance < overlapThreshold) {
             overlapCount++;
         }
     }
-
-    // Calculate overlap ratio
     double overlapRatio = double(overlapCount) / double(totalSamples);
 
-    // Method 3: Direction similarity check (PARALLEL SEGMENTS)
-    bool parallelOverlap = false;
+    // Step 2: Check for parallel orientation.
+    bool isParallel = false;
     if (seg1.nodes.size() >= 2 && seg2.nodes.size() >= 2) {
         Eigen::Vector3d dir1 = (seg1.nodes.back() - seg1.nodes.front()).normalized();
         Eigen::Vector3d dir2 = (seg2.nodes.back() - seg2.nodes.front()).normalized();
-
         double dotProduct = abs(dir1.dot(dir2));
 
-        // If segments are very parallel AND spatially close, they definitely overlap
-        if (dotProduct > 0.75 && overlapRatio > 0.25) {
-            parallelOverlap = true;
+        // Consider them parallel if their end-to-end vectors are closely aligned.
+        if (dotProduct > 0.85) { // Stricter threshold: >85% parallel
+            isParallel = true;
         }
-    }    // FINAL OVERLAP DECISION (MUCH MORE AGGRESSIVE)
-    // Overlap if ANY of:
-    // 1. More than 30% spatial overlap (was 50%)
-    // 2. Parallel directions with ANY spatial overlap
-    // 3. Both segments are very short and close (likely duplicates)
-    bool spatialOverlap = overlapRatio > 0.3; // Much more aggressive
-    bool shortAndClose = (seg1.length < 0.2 && seg2.length < 0.2 && overlapRatio > 0.1);
+    }
 
-    return spatialOverlap || parallelOverlap || shortAndClose;
+    // FINAL DECISION: Overlap only if they are both spatially close AND parallel.
+    // This correctly identifies duplicate paths while preserving distinct components.
+    return (overlapRatio > 0.7 && isParallel);
+    // --- END OF REPLACEMENT ---
 }
 
 vector<PairwiseHarmonicsSegmentation::MeshComponent>
@@ -1490,23 +1489,6 @@ PairwiseHarmonicsSegmentation::generateTorsoSegments() {
     mainTorsoSegment.nodes.push_back(maxPoint);    // Set rigidity values for torso nodes (low rigidity)
     mainTorsoSegment.nodeRigidities.push_back(torsoThreshold * 0.8);
     mainTorsoSegment.nodeRigidities.push_back(torsoThreshold * 0.7);
-    mainTorsoSegment.nodeRigidities.push_back(torsoThreshold * 0.8);
-
-    mainTorsoSegment.sourceIdx = -1; // Special marker for torso segments
-    mainTorsoSegment.targetIdx = -1;
-
-    mainTorsoSegment.length = (maxPoint - minPoint).norm();
-    mainTorsoSegment.avgRigidity = torsoThreshold * 0.75;
-    mainTorsoSegment.quality = mainTorsoSegment.avgRigidity * mainTorsoSegment.length;
-
-    if (mainTorsoSegment.length > 0.1) {
-        torsoSegments.push_back(mainTorsoSegment);
-        cout << "  Created main torso segment: length = " << mainTorsoSegment.length << endl;
-    }
-
-    cout << "  Generated " << torsoSegments.size() << " total torso segments" << endl;
-
-    return torsoSegments;
     mainTorsoSegment.nodeRigidities.push_back(torsoThreshold * 0.8);
 
     mainTorsoSegment.sourceIdx = -1; // Special marker for torso segments
