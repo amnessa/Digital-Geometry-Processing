@@ -1021,7 +1021,7 @@ void visualizeSkeletalKMeansClustering() {
     };
 
     vector<RigidSegment> rigidSegments;
-    const double RIGIDITY_SPLIT_THRESHOLD = 0.88; // Threshold for splitting at junctions
+    const double RIGIDITY_SPLIT_THRESHOLD = 0.85; // Threshold for splitting at junctions
 
     for (int segIdx : selectedSegmentIndices) {
         const auto& segment = g_segmentation_result.partialSkeleton[segIdx];
@@ -1089,64 +1089,56 @@ void visualizeSkeletalKMeansClustering() {
             continue;
         }
 
-        // Split at junction points
+        // --- START OF REPLACEMENT ---
+        // Split at junction points using a more robust method
         cout << "  Segment " << segIdx << ": Found " << junctionIndices.size() << " junctions, splitting..." << endl;
 
-        int startIdx = 0;
-        for (int junctionIdx : junctionIndices) {
-            if (junctionIdx - startIdx >= 3) { // Minimum 3 nodes for a meaningful segment
-                RigidSegment rigidSeg;
-                rigidSeg.originalSegmentIdx = segIdx;
-
-                // Extract nodes from startIdx to junctionIdx
-                for (int i = startIdx; i <= junctionIdx; i++) {
-                    rigidSeg.nodes.push_back(segment.nodes[i]);
-                }
-
-                // Calculate average rigidity for this sub-segment
-                double totalRigidity = 0.0;
-                for (int i = startIdx; i <= junctionIdx; i++) {
-                    totalRigidity += segment.nodeRigidities[i];
-                }
-                rigidSeg.avgRigidity = totalRigidity / (junctionIdx - startIdx + 1);
-
-                // Estimate harmonic values based on position along original segment
-                rigidSeg.startHarmonicValue = (double)startIdx / (segment.nodes.size() - 1);
-                rigidSeg.endHarmonicValue = (double)junctionIdx / (segment.nodes.size() - 1);
-                rigidSeg.sourceIdx = segment.sourceIdx;
-                rigidSeg.targetIdx = segment.targetIdx;
-
-                rigidSegments.push_back(rigidSeg);
-                cout << "    Created rigid sub-segment: nodes " << startIdx << "-" << junctionIdx
-                     << ", avg rigidity: " << rigidSeg.avgRigidity << endl;
+        vector<bool> isJunctionNode(segment.nodes.size(), false);
+        for (int idx : junctionIndices) {
+            if (idx >= 0 && idx < isJunctionNode.size()) {
+                isJunctionNode[idx] = true;
             }
-            startIdx = junctionIdx + 1;
         }
 
-        // Add final segment if there are remaining nodes
-        if (startIdx < segment.nodes.size() - 1) {
-            RigidSegment rigidSeg;
-            rigidSeg.originalSegmentIdx = segIdx;
+        int currentSegmentStart = 0;
+        for (int i = 0; i < segment.nodes.size(); ++i) {
+            // A rigid part ends when we hit a junction or the end of the polyline
+            if (isJunctionNode[i] || i == segment.nodes.size() - 1) {
+                // The rigid part is from currentSegmentStart up to the node before the junction.
+                int currentSegmentEnd = isJunctionNode[i] ? i - 1 : i;
 
-            for (int i = startIdx; i < segment.nodes.size(); i++) {
-                rigidSeg.nodes.push_back(segment.nodes[i]);
+                // Ensure the segment is valid and has at least 2 nodes.
+                if (currentSegmentEnd >= currentSegmentStart && (currentSegmentEnd - currentSegmentStart + 1) >= 2) {
+                    RigidSegment rigidSeg;
+                    rigidSeg.originalSegmentIdx = segIdx;
+
+                    // Extract nodes for this new rigid part
+                    for (int n = currentSegmentStart; n <= currentSegmentEnd; ++n) {
+                        rigidSeg.nodes.push_back(segment.nodes[n]);
+                    }
+
+                    // Calculate average rigidity for this sub-segment
+                    double totalRigidity = 0.0;
+                    for (int n = currentSegmentStart; n <= currentSegmentEnd; ++n) {
+                        totalRigidity += segment.nodeRigidities[n];
+                    }
+                    rigidSeg.avgRigidity = totalRigidity / rigidSeg.nodes.size();
+
+                    // Estimate harmonic values based on position along original segment
+                    rigidSeg.startHarmonicValue = (double)currentSegmentStart / (segment.nodes.size() - 1);
+                    rigidSeg.endHarmonicValue = (double)currentSegmentEnd / (segment.nodes.size() - 1);
+                    rigidSeg.sourceIdx = segment.sourceIdx;
+                    rigidSeg.targetIdx = segment.targetIdx;
+
+                    rigidSegments.push_back(rigidSeg);
+                    cout << "    Created rigid sub-segment: nodes " << currentSegmentStart << "-" << currentSegmentEnd
+                         << ", avg rigidity: " << rigidSeg.avgRigidity << endl;
+                }
+                // The next potential rigid part starts after this junction.
+                currentSegmentStart = i + 1;
             }
-
-            double totalRigidity = 0.0;
-            for (int i = startIdx; i < segment.nodeRigidities.size(); i++) {
-                totalRigidity += segment.nodeRigidities[i];
-            }
-            rigidSeg.avgRigidity = totalRigidity / (segment.nodes.size() - startIdx);
-
-            rigidSeg.startHarmonicValue = (double)startIdx / (segment.nodes.size() - 1);
-            rigidSeg.endHarmonicValue = 1.0;
-            rigidSeg.sourceIdx = segment.sourceIdx;
-            rigidSeg.targetIdx = segment.targetIdx;
-
-            rigidSegments.push_back(rigidSeg);
-            cout << "    Created final rigid sub-segment: nodes " << startIdx << "-" << (segment.nodes.size()-1)
-                 << ", avg rigidity: " << rigidSeg.avgRigidity << endl;
         }
+        // --- END OF REPLACEMENT ---
     }
 
     cout << "Total rigid segments after splitting: " << rigidSegments.size() << "    ";
@@ -1174,17 +1166,18 @@ void visualizeSkeletalKMeansClustering() {
 
     cout << "Cached " << cachedHarmonicFields.size() << " unique harmonic fields" << endl;
 
-    // Step 3: Assign vertices using the watershed principle from the paper
+    // Step 3: Assign vertices using a more robust watershed competition
     cout << "Step 3: Assigning vertices to segments using harmonic watershed competition..." << endl;
 
     vector<int> vertexSegmentAssignment(g_mesh->verts.size(), -1);
     vector<int> segmentVertexCounts(rigidSegments.size(), 0);
 
     for (int v = 0; v < g_mesh->verts.size(); v++) {
-        double bestScore = -1.0;
+        double minDistance = numeric_limits<double>::max();
         int bestSegment = -1;
+        double bestRigidity = 0.0; // Used for tie-breaking
 
-        // For each rigid segment, check if this vertex should belong to it
+        // For each vertex, find the rigid segment it is "closest" to in harmonic space
         for (int rigidSegIdx = 0; rigidSegIdx < rigidSegments.size(); rigidSegIdx++) {
             const auto& rigidSeg = rigidSegments[rigidSegIdx];
 
@@ -1199,57 +1192,27 @@ void visualizeSkeletalKMeansClustering() {
             const Eigen::VectorXd& harmonicField = harmonicIt->second;
             double harmonicValue = harmonicField(v);
 
-            // Key insight: Use harmonic value range to determine segment ownership
-            // A vertex belongs to a rigid segment if its harmonic value falls within that segment's range
-            if (harmonicValue >= rigidSeg.startHarmonicValue && harmonicValue <= rigidSeg.endHarmonicValue) {
-
-                // Calculate how "central" this vertex is within the rigid segment's harmonic range
-                double rangeSize = rigidSeg.endHarmonicValue - rigidSeg.startHarmonicValue;
-                if (rangeSize < 1e-6) rangeSize = 1e-6; // Avoid division by zero
-
-                double normalizedPos = (harmonicValue - rigidSeg.startHarmonicValue) / rangeSize;
-
-                // Score based on: 1) how well-centered in the range, 2) segment's rigidity
-                // Higher rigidity = more tube-like = more confident assignment
-                double centralityScore = 1.0 - abs(normalizedPos - 0.5) * 2.0; // Peak at center (0.5)
-                double rigidityWeight = rigidSeg.avgRigidity;
-                double score = centralityScore * rigidityWeight;
-
-                if (score > bestScore) {
-                    bestScore = score;
-                    bestSegment = rigidSegIdx;
-                }
+            // Calculate the distance from the vertex's harmonic value to this segment's range
+            double distanceToRange = 0.0;
+            if (harmonicValue < rigidSeg.startHarmonicValue) {
+                distanceToRange = rigidSeg.startHarmonicValue - harmonicValue;
+            } else if (harmonicValue > rigidSeg.endHarmonicValue) {
+                distanceToRange = harmonicValue - rigidSeg.endHarmonicValue;
             }
-        }
 
-        // If no rigid segment claimed this vertex, use fallback strategy
-        if (bestSegment == -1) {
-            // Fallback: Find which rigid segment this vertex is closest to in harmonic space
-            double minHarmonicDistance = 1e10;
-            Eigen::Vector3d vertexPos(g_mesh->verts[v]->coords[0], g_mesh->verts[v]->coords[1], g_mesh->verts[v]->coords[2]);
-
-            for (int rigidSegIdx = 0; rigidSegIdx < rigidSegments.size(); rigidSegIdx++) {
-                const auto& rigidSeg = rigidSegments[rigidSegIdx];
-
-                // Get harmonic value for this vertex from this segment's field
-                pair<int, int> segmentPair = {rigidSeg.sourceIdx, rigidSeg.targetIdx};
-                auto harmonicIt = cachedHarmonicFields.find(segmentPair);
-
-                if (harmonicIt != cachedHarmonicFields.end()) {
-                    const Eigen::VectorXd& harmonicField = harmonicIt->second;
-                    double harmonicValue = harmonicField(v);
-
-                    // Distance to this segment's harmonic range
-                    double distanceToRange = 0.0;
-                    if (harmonicValue < rigidSeg.startHarmonicValue) {
-                        distanceToRange = rigidSeg.startHarmonicValue - harmonicValue;
-                    } else if (harmonicValue > rigidSeg.endHarmonicValue) {
-                        distanceToRange = harmonicValue - rigidSeg.endHarmonicValue;
-                    }
-                      if (distanceToRange < minHarmonicDistance) {
-                        minHarmonicDistance = distanceToRange;
-                        bestSegment = rigidSegIdx;
-                    }
+            // --- NEW TIE-BREAKING LOGIC ---
+            // If this segment is a better fit (closer distance), it becomes the new best.
+            if (distanceToRange < minDistance) {
+                minDistance = distanceToRange;
+                bestSegment = rigidSegIdx;
+                bestRigidity = rigidSeg.avgRigidity;
+            }
+            // If it's just as close (i.e., distance is 0), break the tie
+            // by choosing the segment with the highest average rigidity.
+            else if (abs(distanceToRange - minDistance) < 1e-9) { // Floating point comparison
+                if (rigidSeg.avgRigidity > bestRigidity) {
+                    bestSegment = rigidSegIdx;
+                    bestRigidity = rigidSeg.avgRigidity;
                 }
             }
         }
@@ -1260,8 +1223,8 @@ void visualizeSkeletalKMeansClustering() {
         }
     }
 
-    // Step 3: Visualize the results
-    cout << "Step 3: Visualizing segmentation results..." << endl;
+    // Step 4: Visualize the results
+    cout << "Step 4: Visualizing segmentation results..." << endl;
 
     // Print segment statistics
     for (int i = 0; i < rigidSegments.size(); i++) {
