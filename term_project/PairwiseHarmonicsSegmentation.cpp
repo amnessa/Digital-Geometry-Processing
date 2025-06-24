@@ -111,7 +111,7 @@ vector<int> PairwiseHarmonicsSegmentation::computeFPSSamples() {
 vector<PairwiseHarmonicsSegmentation::SkeletalSegment>
 PairwiseHarmonicsSegmentation::generateSkeletalSegments(const vector<int>& fpsPoints) {
 
-    vector<SkeletalSegment> segments;
+vector<SkeletalSegment> segments;
     int totalPairs = fpsPoints.size() * (fpsPoints.size() - 1) / 2;
     int processedPairs = 0;
 
@@ -131,20 +131,16 @@ PairwiseHarmonicsSegmentation::generateSkeletalSegments(const vector<int>& fpsPo
             }            // Extract complete limb segments (PAPER-CORRECT APPROACH)
             vector<SkeletalSegment> pairSegments = extractCompleteLimbSegments(harmonicField, fpsPoints[i], fpsPoints[j]);
 
-            // Add all valid segments from this point pair
+            // --- START OF FIX ---
+            // The old filter here was incorrect for the new splitting logic.
+            // The extractCompleteLimbSegments function now produces valid, shorter limb
+            // segments. The validation for length and quality is handled there and
+            // in the greedy selection stage. We should add all generated segments
+            // to the candidate pool.
             for (const auto& segment : pairSegments) {
-                // Filter based on length relative to direct endpoint distance
-                Eigen::Vector3d endpointDist(
-                    mesh->verts[fpsPoints[i]]->coords[0] - mesh->verts[fpsPoints[j]]->coords[0],
-                    mesh->verts[fpsPoints[i]]->coords[1] - mesh->verts[fpsPoints[j]]->coords[1],
-                    mesh->verts[fpsPoints[i]]->coords[2] - mesh->verts[fpsPoints[j]]->coords[2]
-                );
-                double endpointDistance = endpointDist.norm();
-
-                if (segment.length > endpointDistance * params.minSegmentLength) {
-                    segments.push_back(segment);
-                }
+                segments.push_back(segment);
             }
+            // --- END OF FIX ---
         }
     }
 
@@ -518,17 +514,17 @@ PairwiseHarmonicsSegmentation::extractCompleteLimbSegments(
         // Find where the limb connects to the torso (major rigidity drop)
         double junctionThreshold = 0.55; // Conservative threshold for true anatomical junctions
 
-        if (sourceIsLimbTip) {
+    if (sourceIsLimbTip) {
             // Create limb segment from source tip to torso junction
             int junctionIdx = pathRigidities.size() - 1; // Default to end
 
             // Find first significant rigidity drop
-            for (int i = 1; i < pathRigidities.size(); i++) {
-                if (pathRigidities[i] < junctionThreshold) {
-                    junctionIdx = i;
-                    break;
-                }
+        for (int i = 1; i < pathRigidities.size(); i++) {
+            if (pathRigidities[i] < junctionThreshold) {
+                junctionIdx = i;
+                break;
             }
+        }
 
             // Only create segment if it has reasonable length
             if (junctionIdx > 2) {
@@ -553,17 +549,17 @@ PairwiseHarmonicsSegmentation::extractCompleteLimbSegments(
             }
         }
 
-        if (targetIsLimbTip) {
+    if (targetIsLimbTip) {
             // Create limb segment from torso junction to target tip
             int junctionIdx = 0; // Default to start
 
             // Find last significant rigidity drop (working backwards)
-            for (int i = pathRigidities.size() - 2; i >= 0; i--) {
-                if (pathRigidities[i] < junctionThreshold) {
+        for (int i = pathRigidities.size() - 2; i >= 0; i--) {
+            if (pathRigidities[i] < junctionThreshold) {
                     junctionIdx = i + 1;
-                    break;
-                }
+                break;
             }
+        }
 
             // Only create segment if it has reasonable length and doesn't overlap with source segment
             if ((pathRigidities.size() - 1 - junctionIdx) > 2) {

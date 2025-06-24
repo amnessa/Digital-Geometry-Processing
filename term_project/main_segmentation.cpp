@@ -1065,7 +1065,7 @@ void visualizeSkeletalKMeansClustering() {
             int endNode = cutPoint - 1;
 
             // Ensure the segment is valid and has at least 1 node.
-            if (endNode >= startNode) {
+            if (endNode >= startNode + 1) {
                 RigidSegment rigidSeg;
                 rigidSeg.originalSegmentIdx = segIdx;
 
@@ -1625,6 +1625,21 @@ void visualizeGraphCutSegmentation() {
 
     for (int segIdx : selectedSegmentIndices) {
         const auto& segment = g_segmentation_result.partialSkeleton[segIdx];
+        // FIX: Treat torso segments (which have negative source/target) as single rigid parts.
+        // They represent the core and shouldn't be split by rigidity.
+        if (segment.sourceIdx < 0) {
+            cout << "  Segment " << segIdx << " is a torso segment, adding as a single rigid part." << endl;
+            RigidSegment rigidSeg;
+            rigidSeg.originalSegmentIdx = segIdx;
+            rigidSeg.nodes = segment.nodes;
+            rigidSeg.avgRigidity = segment.avgRigidity;
+            rigidSeg.startHarmonicValue = 0.0;
+            rigidSeg.endHarmonicValue = 1.0;
+            rigidSeg.sourceIdx = segment.sourceIdx;
+            rigidSeg.targetIdx = segment.targetIdx;
+            rigidSegments.push_back(rigidSeg);
+            continue;
+        }
 
         if (segment.nodes.size() < 3 || segment.nodeRigidities.size() != segment.nodes.size()) {
             RigidSegment rigidSeg;
@@ -1683,7 +1698,7 @@ void visualizeGraphCutSegmentation() {
             int endNode = cutPoint - 1;
 
             // Ensure the segment is valid and has at least 1 node.
-            if (endNode >= startNode) {
+            if (endNode >= startNode + 1) {
                 RigidSegment rigidSeg;
                 rigidSeg.originalSegmentIdx = segIdx;
 
