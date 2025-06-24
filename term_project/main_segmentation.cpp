@@ -1815,10 +1815,25 @@ void visualizeGraphCutSegmentation() {
         for (int label = 0; label < numLabels; label++) {
             const auto& rigidSeg = rigidSegments[label];
 
-            if (rigidSeg.sourceIdx >= 0 && rigidSeg.targetIdx >= 0) {
-                // Use harmonic distance for limb segments
+            // --- NEW: Compute geometric distance for ALL segments first ---
+            // This provides a spatial locality term for the energy function.
+            double minEuclideanDist = numeric_limits<double>::max();
+            if (!rigidSeg.nodes.empty()) {
+                for (const auto& nodePos : rigidSeg.nodes) {
+                    double dist = (faceCentroid - nodePos).norm();
+                    minEuclideanDist = min(minEuclideanDist, dist);
+                }
+            }
 
-                // --- FIX: Use canonical key to look up the field and adjust the value based on direction ---
+            float bbox_diag = g_mesh->getBoundingBoxDiagonal();
+            double euclidean_cost = (bbox_diag > 1e-6) ? (minEuclideanDist / bbox_diag) : minEuclideanDist;
+
+
+            if (rigidSeg.sourceIdx >= 0 && rigidSeg.targetIdx >= 0) {
+                // --- REVISED COST (Limb Segments) ---
+                // Combine harmonic and geometric costs to prevent segments from "stealing" distant faces.
+                double harmonic_cost = 1.0; // Default to high cost if field is not found
+
                 int src = rigidSeg.sourceIdx;
                 int tgt = rigidSeg.targetIdx;
                 pair<int, int> canonicalPair = {min(src, tgt), max(src, tgt)};
@@ -1828,40 +1843,22 @@ void visualizeGraphCutSegmentation() {
                     const Eigen::VectorXd& harmonicField = harmonicIt->second;
                     double harmonicValue = harmonicField(closestVertex);
 
-                    // The cached field is always from min_idx to max_idx.
-                    // If this segment's source is the max_idx, we need to flip the harmonic value.
                     if (src > tgt) {
                         harmonicValue = 1.0 - harmonicValue;
                     }
 
-                    // --- REVISED COST FUNCTION (Limb Segments) ---
-                    // The old cost function created a "zero-cost" zone that gave limb segments an unfair advantage.
-                    // The new cost is the distance to the center of the segment's harmonic range,
-                    // which provides a smoother and more competitive cost value.
                     double rangeCenter = (rigidSeg.startHarmonicValue + rigidSeg.endHarmonicValue) / 2.0;
-                    dataCost[f][label] = abs(harmonicValue - rangeCenter);
-
-                } else {
-                    dataCost[f][label] = 1.0; // High cost if field not found
+                    harmonic_cost = abs(harmonicValue - rangeCenter);
                 }
+
+                // Combine costs. Lambda weights the importance of geometric proximity.
+                const double lambda = 1.0; // A lambda of 1.0 gives them equal initial weighting.
+                dataCost[f][label] = harmonic_cost + lambda * euclidean_cost;
+
             } else {
-                // --- REVISED COST FUNCTION (Torso Segments) ---
-                // The old cost had an arbitrary scaling factor.
-                // The new cost normalizes the Euclidean distance by the mesh's bounding box diagonal,
-                // making it directly comparable to the harmonic costs which are in the [0, 1] range.
-                double minEuclideanDist = numeric_limits<double>::max();
-                for (const auto& nodePos : rigidSeg.nodes) {
-                    double dist = (faceCentroid - nodePos).norm();
-                    minEuclideanDist = min(minEuclideanDist, dist);
-                }
-
-                float bbox_diag = g_mesh->getBoundingBoxDiagonal();
-                if (bbox_diag > 1e-6) {
-                    // Scale cost to be comparable to harmonic cost (which is in [0, 0.5])
-                    dataCost[f][label] = (minEuclideanDist / bbox_diag);
-                } else {
-                    dataCost[f][label] = minEuclideanDist; // Fallback
-                }
+                // --- COST (Torso Segments) ---
+                // Torso cost remains purely geometric.
+                dataCost[f][label] = euclidean_cost;
             }
         }
     }
