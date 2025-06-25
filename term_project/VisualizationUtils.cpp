@@ -718,7 +718,7 @@ void VisualizationUtils::visualizeHarmonicSurfaceSegmentation(const PairwiseHarm
 
                 // Find potential junction points (low rigidity)
                 vector<int> junctionPoints;
-                const double threshold = 0.85;
+                const double threshold = 0.90;
                 for (int i = 0; i < testSegment.nodeRigidities.size(); i++) {
                     if (testSegment.nodeRigidities[i] < threshold) {
                         junctionPoints.push_back(i);
@@ -841,10 +841,15 @@ void VisualizationUtils::visualizeGraphCutSegmentation(const PairwiseHarmonicsSe
     } else {
         // STATIC MODE: Use the original skeleton from the segmentation result
         cout << "STATIC MODE: Using reference skeleton for segmentation." << endl;
-        // This reuses the existing logic to split the original skeleton by rigidity
+        // Separate limb segments from abstract torso segments.
+        // Torso segments are merged into a single component to represent the main body.
+        vector<Eigen::Vector3d> allTorsoNodes;
+
         for (int segIdx = 0; segIdx < result.partialSkeleton.size(); ++segIdx) {
             const auto& segment = result.partialSkeleton[segIdx];
-            if (segment.sourceIdx < 0) { // Handle torso
+
+            if (segment.sourceIdx >= 0 && segment.targetIdx >= 0) {
+                // This is a limb segment, based on a harmonic field. Add it directly.
                 RigidSegment rigidSeg;
                 rigidSeg.originalSegmentIdx = segIdx;
                 rigidSeg.nodes = segment.nodes;
@@ -854,18 +859,22 @@ void VisualizationUtils::visualizeGraphCutSegmentation(const PairwiseHarmonicsSe
                 rigidSeg.sourceIdx = segment.sourceIdx;
                 rigidSeg.targetIdx = segment.targetIdx;
                 rigidSegments.push_back(rigidSeg);
-            } else { // Handle limbs
-                // This logic is preserved from your original function
-                RigidSegment rigidSeg;
-                rigidSeg.originalSegmentIdx = segIdx;
-                rigidSeg.nodes = segment.nodes;
-                rigidSeg.avgRigidity = segment.avgRigidity;
-                rigidSeg.startHarmonicValue = 0.0;
-                rigidSeg.endHarmonicValue = 1.0;
-                rigidSeg.sourceIdx = segment.sourceIdx;
-                rigidSeg.targetIdx = segment.targetIdx;
-                rigidSegments.push_back(rigidSeg);
+            } else {
+                // This is an abstract torso segment. Collect its nodes to form a unified torso.
+                allTorsoNodes.insert(allTorsoNodes.end(), segment.nodes.begin(), segment.nodes.end());
             }
+        }
+
+        // If any torso nodes were collected, create a single unified torso segment.
+        if (!allTorsoNodes.empty()) {
+            cout << "Creating a single unified torso segment from " << allTorsoNodes.size() << " collected nodes." << endl;
+            RigidSegment torsoSeg;
+            torsoSeg.originalSegmentIdx = -1; // Special index for the unified torso
+            torsoSeg.nodes = allTorsoNodes;
+            torsoSeg.avgRigidity = 0.0; // Not applicable
+            torsoSeg.sourceIdx = -1;    // Mark as non-harmonic (geometric cost only)
+            torsoSeg.targetIdx = -1;
+            rigidSegments.push_back(torsoSeg);
         }
     }
 
@@ -1048,23 +1057,79 @@ void VisualizationUtils::visualizeGraphCutSegmentation(const PairwiseHarmonicsSe
     cout << "Computing smoothness costs based on dihedral angles..." << endl;
 
     // Simple smoothness model: constant penalty for label disagreement
-    double smoothnessPenalty = 0.4;
+    double smoothnessPenalty = 0.2;
 
     // Step 5: Solve energy minimization using iterative ICM (Iterated Conditional Modes)
     cout << "Step 5: Solving energy minimization using ICM optimization..." << endl;
 
-    // Initialize with greedy assignment based on minimum data cost
-    for (int f = 0; f < numFaces; f++) {
-        int bestLabel = 0;
-        double minCost = dataCost[f][0];
-        for (int label = 1; label < numLabels; label++) {
-            if (dataCost[f][label] < minCost) {
-                minCost = dataCost[f][label];
-                bestLabel = label;
+    // --- NEW: Initialize face labels from the original segmentation result ---
+    // This provides a much better starting point for ICM optimization than a simple
+    // greedy assignment. It uses the watershed-style components as a strong prior,
+    // allowing the graph-cut to focus on refining boundaries rather than re-doing
+    // the entire segmentation from a potentially poor initial state.
+    cout << "Initializing face labels using prior segmentation from watershed-style method..." << endl;
+
+    // Step 1: Map each vertex to its initial component index from the pre-segmentation.
+    vector<int> vertex_to_component_map(mesh->verts.size(), -1);
+    for (int compIdx = 0; compIdx < result.meshComponents.size(); ++compIdx) {
+        for (int vertIdx : result.meshComponents[compIdx].vertexIndices) {
+            if (vertIdx >= 0 && vertIdx < mesh->verts.size()) {
+                vertex_to_component_map[vertIdx] = compIdx;
             }
         }
-        faceLabels[f] = bestLabel;
     }
+
+    // Step 2: Determine the mapping from initial components to the graph-cut labels.
+    // The graph-cut uses N limb labels and one optional unified torso label.
+    // The initial segmentation produces N limb components and several torso/junction components.
+    // We assume the first N components correspond to the first N limb labels.
+    int num_limb_labels = 0;
+    int torso_label = -1;
+    for (int i = 0; i < rigidSegments.size(); ++i) {
+        if (rigidSegments[i].sourceIdx >= 0) {
+            num_limb_labels++;
+        } else {
+            torso_label = i;
+        }
+    }
+
+    // Step 3: Assign an initial label to each face based on its vertices' components.
+    for (int f = 0; f < numFaces; f++) {
+        Triangle* face = mesh->tris[f];
+        // Use a majority vote to find the face's dominant initial component.
+        map<int, int> component_counts;
+        component_counts[vertex_to_component_map[face->v1i]]++;
+        component_counts[vertex_to_component_map[face->v2i]]++;
+        component_counts[vertex_to_component_map[face->v3i]]++;
+
+        int majority_component = -1;
+        int max_count = 0;
+        for (auto const& [comp, count] : component_counts) {
+            if (comp != -1 && count > max_count) {
+                max_count = count;
+                majority_component = comp;
+            }
+        }
+
+        if (majority_component != -1) {
+            // Map the initial component index to the corresponding graph-cut label.
+            if (majority_component < num_limb_labels) {
+                // This is a limb component. The labels are assumed to align.
+                faceLabels[f] = majority_component;
+            } else {
+                // This is a torso/junction component. Assign it to the unified torso label.
+                if (torso_label != -1) {
+                    faceLabels[f] = torso_label;
+                } else {
+                    faceLabels[f] = 0; // Fallback if no torso exists
+                }
+            }
+        } else {
+            faceLabels[f] = 0; // Fallback for any unassigned faces
+        }
+    }
+    cout << "Initialization from prior segmentation complete." << endl;
+
 
     // ICM iterations to minimize energy
     bool converged = false;

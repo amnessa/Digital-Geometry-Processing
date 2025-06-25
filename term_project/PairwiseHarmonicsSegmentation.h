@@ -19,10 +19,10 @@ class PairwiseHarmonicsSegmentation {
 public:    struct SegmentationParams {
         int numFPSSamples = 12;           // FIXED: Fewer FPS samples (12 choose 2 = 66 pairs vs 190)
         int numIsocurves = 25;            // FIXED: Fewer isocurves for cleaner paths
-        double rigidityThreshold = 0.65;  // Lowered: more inclusive for limb segments
+        double rigidityThreshold = 0.85;  // Lowered: more inclusive for limb segments
         double isoTolerance = 0.04;       // Slightly larger tolerance for robustness
         double minSegmentLength = 0.10;   // FIXED: Higher minimum - filter out tiny segments
-        int minSkeletalNodes = 4;         // FIXED: Require more nodes for meaningful segments
+        int minSkeletalNodes = 5;         // FIXED: Require more nodes for meaningful segments
         int maxSkeletonSegments = 8;      // FIXED: Even fewer final segments (limbs + spine)
         double junctionThreshold = 0.55;  // Lowered: more sensitive junction detection
         double minQualityThreshold = 0.07; // NEW: Minimum quality to enter candidate pool

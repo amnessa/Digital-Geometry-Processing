@@ -379,7 +379,7 @@ PairwiseHarmonicsSegmentation::extractRigidityBasedSegments(
 
                 // Only create segment if it's predominantly high-rigidity (actual limb)
                 double highRigidityRatio = double(highRigidityCount) / (endIdx - startIdx + 1);
-                if (highRigidityRatio >= 0.7) {  // Stricter requirement: 70% high-rigidity
+                if (highRigidityRatio >= 0.8) {  // Stricter requirement: 80% high-rigidity
                     SkeletalSegment segment;
 
                     // Copy nodes for this limb segment
@@ -480,8 +480,8 @@ PairwiseHarmonicsSegmentation::extractCompleteLimbSegments(
     // Only divide if there are clear anatomical boundaries (very low rigidity zones)
 
     // Check if this path represents a complete limb (high rigidity at endpoints)
-    bool sourceIsLimbTip = pathRigidities.front() > 0.65;
-    bool targetIsLimbTip = pathRigidities.back() > 0.65;
+    bool sourceIsLimbTip = pathRigidities.front() > 0.86;
+    bool targetIsLimbTip = pathRigidities.back() > 0.86;
 
     cout << "    Source rigidity: " << pathRigidities.front() << (sourceIsLimbTip ? " (LIMB TIP)" : " (JUNCTION)") << endl;
     cout << "    Target rigidity: " << pathRigidities.back() << (targetIsLimbTip ? " (LIMB TIP)" : " (JUNCTION)") << endl;
@@ -510,7 +510,7 @@ PairwiseHarmonicsSegmentation::extractCompleteLimbSegments(
     // Strategy 2: If one endpoint is limb tip, create limb segment from tip to junction
     else if (sourceIsLimbTip || targetIsLimbTip) {
         // Find where the limb connects to the torso (major rigidity drop)
-        double junctionThreshold = 0.55; // Conservative threshold for true anatomical junctions
+        double junctionThreshold = 0.86; // Conservative threshold for true anatomical junctions
 
     if (sourceIsLimbTip) {
             // Create limb segment from source tip to torso junction
@@ -1463,7 +1463,7 @@ PairwiseHarmonicsSegmentation::generateTorsoSegments() {
     cout << "Generating improved torso skeleton from low-rigidity areas..." << endl;
 
     // Identify low-rigidity vertices (torso/junction areas)
-    double torsoThreshold = 0.6; // Same threshold used for anatomical boundaries
+    double torsoThreshold = 0.80; // Same threshold used for anatomical boundaries
     vector<int> torsoVertices;
 
     for (int v = 0; v < mesh->verts.size(); v++) {
