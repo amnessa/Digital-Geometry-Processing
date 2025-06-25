@@ -72,6 +72,17 @@ vector<vector<Eigen::Vector3d>> g_skeletal_segments;
 vector<double> g_rigidity_scores;
 vector<bool> g_nonrigid_nodes;
 
+// NEW: Global variables for animated mesh pipeline
+struct StaticAnalysisData {
+    vector<int> staticSkeleton;                    // Joint/node indices from reference mesh
+    vector<int> staticSegmentLabels;               // Per-vertex segment labels from CRF
+    vector<tuple<int, int, float, float, float>> skeletonBindings; // joint_id, triangle_id, u, v, w barycentric coords
+    bool isValid = false;
+} g_staticAnalysis;
+
+vector<string> g_animationFrames;                 // List of animation frame filenames
+int g_currentFrameIndex = 0;                      // Current frame being processed
+
 // Algorithm parameters (from the paper)
 const int DEFAULT_K = 50;           // Number of isocurves per harmonic field
 const double RIGIDITY_THRESHOLD = 0.85;  // Threshold for classifying rigid vs non-rigid nodes (significantly lowered for better junction detection)
@@ -94,6 +105,12 @@ void visualizeGraphCutSegmentation(); // NEW: Graph-cut based optimal segmentati
 void analyzeSkeletalSegments();
 void analyzeDetailedRigidity();
 void testHarmonicSurfaceSegmentation(); // Forward declare the new test function
+
+// NEW: Animated mesh pipeline functions
+void generateStaticAnalysis();           // Stage 1: Run once on reference mesh
+void processAnimationSequence();        // Stage 2: Process all animation frames
+void processAnimationFrame();           // Process single frame interactively
+void loadAnimationSequence();           // Load horse gallop animation
 
 /**
  * Load a mesh file and initialize the segmentation system
@@ -1599,7 +1616,6 @@ void visualizeGraphCutSegmentation() {
         Eigen::Vector3f(0.5f, 0.0f, 1.0f), // Purple
         Eigen::Vector3f(0.5f, 1.0f, 0.5f), // Light Green
         Eigen::Vector3f(1.0f, 0.5f, 0.5f)  // Light Red
-
     };
 
     // Use all skeletal segments from the segmentation result
@@ -2082,4 +2098,91 @@ void visualizeGraphCutSegmentation() {
     cout << "-> Energy function combines harmonic affinity with boundary smoothness" << endl;
     cout << "-> Each color represents an optimal segment found by graph-cut algorithm" << endl;
     cout << "-> This approach provides cleaner boundaries and better global consistency" << endl;
+}
+
+/**
+ * Stage 1: Generate static analysis data for the mesh
+ * This function runs the initial analysis and saves the results for all frames.
+ */
+void generateStaticAnalysis() {
+    if (!g_mesh || !g_harmonics) {
+        cout << "Error: Mesh and harmonics must be loaded first!" << endl;
+        return;
+    }
+
+    cout << "\n=== GENERATE STATIC ANALYSIS ===" << endl;
+    cout << "Running static analysis for the mesh..." << endl;
+
+    // Perform the full segmentation to generate static data
+    performFullSegmentation();
+
+    // Save the segmentation result as the static reference
+    cout << "Saving static analysis result..." << endl;
+    g_segmentation_result.save("static_analysis_result.txt");
+
+    cout << "Static analysis complete. Result saved as 'static_analysis_result.txt'." << endl;
+}
+
+/**
+ * Stage 2: Process the animation sequence for the mesh
+ * This function loads the animation data, applies the segmentation, and saves the results.
+ */
+void processAnimationSequence() {
+    if (!g_mesh || !g_harmonics) {
+        cout << "Error: Mesh and harmonics must be loaded first!" << endl;
+        return;
+    }
+
+    cout << "\n=== PROCESS ANIMATION SEQUENCE ===" << endl;
+    cout << "Loading animation sequence..." << endl;
+
+    // Load the animation sequence (e.g., horse gallop)
+    if (!loadAnimationSequence()) {
+        cout << "Error: Failed to load animation sequence!" << endl;
+        return;
+    }
+
+    cout << "Processing each frame in the animation sequence..." << endl;
+
+    // Process each frame: apply segmentation and save results
+    for (int frame = 0; frame < g_animation_frames.size(); frame++) {
+        cout << "Processing frame " << frame + 1 << " / " << g_animation_frames.size() << "..." << endl;
+
+        // Set the current mesh to the frame's mesh
+        g_mesh->setFrom(g_animation_frames[frame]);
+
+        // Perform segmentation on the current frame
+        performFullSegmentation();
+
+        // Save the segmentation result for this frame
+        cout << "  Saving result for frame " << frame + 1 << "..." << endl;
+        g_segmentation_result.save("segmentation_result_frame_" + to_string(frame + 1) + ".txt");
+    }
+
+    cout << "Animation sequence processing complete." << endl;
+}
+
+/**
+ * Load the animation sequence data
+ * This function loads the horse gallop animation data from files.
+ */
+void loadAnimationSequence() {
+    cout << "Loading horse gallop animation sequence..." << endl;
+
+    // For simplicity, let's assume the animation consists of 10 frames
+    const int numFrames = 10;
+    g_animation_frames.resize(numFrames);
+
+    for (int i = 0; i < numFrames; i++) {
+        // Load each frame's mesh (assuming files are named frame_1.off, frame_2.off, ...)
+        string frameFile = "models/frame_" + to_string(i + 1) + ".off";
+
+        g_animation_frames[i] = new Mesh();
+        g_animation_frames[i]->loadOff(const_cast<char*>(frameFile.c_str()));
+        g_animation_frames[i]->normalizeCoordinates();
+
+        cout << "  Loaded frame " << i + 1 << ": " << frameFile << endl;
+    }
+
+    cout << "Horse gallop animation sequence loaded: " << numFrames << " frames." << endl;
 }

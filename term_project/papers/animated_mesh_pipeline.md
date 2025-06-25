@@ -1,51 +1,66 @@
-Of course. Here is a clear, basic pipeline for the animated mesh project. This plan uses the tools you have already built (your CRF segmentation) and is achievable in your remaining time.
+The skeleton will define the "parts," and the CRF will create a high-quality segmentation that cleanly assigns the mesh surface to those skeletal parts.
 
-### Project Pipeline: Consistent Segmentation for Animated Meshes
+Here is a clear, step-by-step explanation of the full implementation pipeline.
 
-The core strategy is: **Segment Once, Propagate to All Frames, then Analyze.**
+### Systematic Pipeline: Skeleton-Driven CRF for Animated Meshes
 
------
+The entire process can be broken into two main stages. Stage 1 is the slow, heavy analysis that you only run **once** on the clean reference mesh. Stage 2 is the fast, lightweight loop that you run for every frame of the animation to create the final video.
 
-#### **Step 1: Create the "Master" Segmentation**
+---
 
-This is the only time you run your expensive segmentation algorithm.
+### **Stage 1: Static Analysis (Run Once)**
 
-  * [cite\_start]**Input:** A single, high-quality **reference mesh** (, `horse-gallop-reference.off`)[cite: 485].
-  * **Process:** Run your CRF-based segmentation on this single mesh.
-  * **Output:** A set of labels, one for each vertex, that defines the character's parts (e.g., `Vertex 1 -> Torso`, `Vertex 500 -> Hand`(or 500 to certain label(x))). This is your master blueprint.
+This stage generates all the core data from the single reference mesh (e.g., `horse-gallop-reference.off`).
 
------
+#### **Step 1.A: Generate the Static Skeleton**
 
-#### **Step 2: Propagate the Segmentation (The Tracking Step)**
+* **Input:** The single reference mesh.
+* **Process:** Run your existing skeleton generation algorithm (the one based on Pairwise Harmonics that produces `rigidSegments`). This defines the fundamental articulated structure of the character.
+* **Output:** A **Static Skeleton**, which is a list of joints (the endpoints) and bones (the segments connecting them).
 
-This step applies your master blueprint to the entire animation sequence instantly.
+#### **Step 1.B: Segment the Surface with Skeleton-Driven CRF**
 
-  * **Input:**
-    1.  The master labels from Step 1.
-    2.  The full animation sequence (e.g., all 48 `horse-gallop-*.off` files). (horse-gallop-01.off to horse-gallop-48.off)
-  * **Process:** For each frame of the animation, apply the master labels directly to the corresponding vertices. Since vertex \#500 is always the same point on the horse's skin, it always gets the "Hand" or some certain label(x) label. This is a simple data-copying operation.
-  * **Output:** A sequence of animated meshes where the segmentation colors are perfectly stable and do not flicker.
+* **Input:**
+    1.  The reference mesh.
+    2.  The **Static Skeleton** from Step 1.A.
+* **Process:** This is where you use your CRF. The bones of the skeleton become the "labels" or "terminals" for the segmentation.
+    1.  **Define Data Cost:** For each face on the mesh, calculate its "cost" to belong to each *bone* of the skeleton. This cost can be based on harmonic values or simple Euclidean distance to the bone, just as you planned before.
+    2.  **Define Smoothness Cost:** Calculate the cost of having a segment boundary between any two adjacent faces (e.g., using the dihedral angle).
+    3.  Run your CRF solver (graph cut) to find the optimal assignment of each face to a skeleton bone.
+* **Output:** A **Master Segmentation**, which is a high-quality, per-vertex (or per-face) set of labels that perfectly aligns with your generated skeleton.
 
------
+#### **Step 1.C: Bind the Skeleton for Deformation**
 
-#### **Step 3: Analyze Segment Rigidity (The "Proof")**
+* **Input:**
+    1.  The **Static Skeleton** from Step 1.A.
+    2.  The surface of the reference mesh.
+* **Process:** Attach each joint of the skeleton to the mesh surface using **barycentric coordinates**. For each joint, find the closest triangle on the mesh and save its `(u, v, w)` coordinates relative to that triangle's vertices.
+* **Output:** A list of **Binding Data** (e.g., `[joint_0, triangle_12, (0.5, 0.3, 0.2)]`, `[joint_1, triangle_58, (0.1, 0.8, 0.1)]`, etc.).
 
-Here you quantitatively prove that the parts you segmented are actually rigid.
+---
 
-  * **Input:** The consistently segmented animation sequence from Step 2.
-  * **Process:**
-    1.  For each colored segment (like the lower-left leg), pick a few random pairs of vertices inside it.
-    2.  Measure the 3D distance between these pairs in the first frame.
-    3.  Measure how much that distance changes in all the other frames.
-  * **Output:** A "non-rigidity score" for each segment. You will find that bones have a very low score, while areas covering joints have a high score.
+### **Stage 2: Dynamic Propagation (A Fast Loop for Every Frame)**
 
------
+Now you loop through every frame of the animation (e.g., `horse-gallop-01.off` to `horse-gallop-48.off`). All the steps inside this loop are extremely fast as they use the pre-computed data from Stage 1.
 
-#### **Final Deliverable**
+#### **Step 2.A: Transfer the Segmentation**
 
-Combine everything into a final result for your report and presentation.
+* **Input:** The **Master Segmentation** labels from Step 1.B.
+* **Process:** Apply the labels directly to the current animation frame using the one-to-one vertex correspondence.
+* **Output:** The current frame of the horse, now colored with a stable, flicker-free segmentation.
 
-  * **Create a side-by-side video:** Show the original animation next to your consistently segmented version.
-  * **Include your analysis:** Present the chart of non-rigidity scores to provide data that backs up your visual results.
+#### **Step 2.B: Deform the Skeleton**
 
-This pipeline directly addresses the challenge of tracking segments on a deforming mesh, uses your existing work, and is a complete, impressive story for a final project report.
+* **Input:** The **Binding Data** from Step 1.C.
+* **Process:** Use the saved barycentric coordinates to calculate the new 3D position of each joint based on the new positions of the vertices of its bound triangle in the current animation frame.
+* **Output:** A **Deformed Skeleton** for the current frame, perfectly posed with the mesh.
+
+#### **Step 2.C: Render the Final Frame**
+
+* **Input:**
+    1.  The colored mesh from Step 2.A.
+    2.  The deformed skeleton from Step 2.B.
+* **Process:** Render the image for the current frame, drawing the deformed skeleton inside the colored mesh. Save the image.
+* **Output:** One frame of your final video.
+
+After looping through all animation frames, you can combine the rendered images to create your final video deliverable.
