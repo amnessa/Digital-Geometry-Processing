@@ -2,6 +2,8 @@
 
 #include <vector>
 #include "Mesh.h"
+#include "Painter.h"
+#include "PairwiseHarmonicsSegmentation.h"
 
 // Forward declarations for Coin3D types
 class SoSeparator;
@@ -30,12 +32,8 @@ public:
      * @param root The scene graph root for visualization
      * @param viewer The 3D viewer for rendering
      */
-    static void testCotangentLaplacian(
-        Mesh* mesh,
-        PairwiseHarmonics* harmonics,
-        SoSeparator* root,
-        SoWinExaminerViewer* viewer
-    );
+    static void testCotangentLaplacian(Mesh* mesh, PairwiseHarmonics* harmonics, SoSeparator* root, SoWinExaminerViewer* viewer);
+
 
     /**
      * Test farthest point sampling with visualization
@@ -44,12 +42,8 @@ public:
      * @param root The scene graph root for visualization
      * @param viewer The 3D viewer for rendering
      */
-    static void testFarthestPointSampling(
-        Mesh* mesh,
-        std::vector<int>& fps_samples,
-        SoSeparator* root,
-        SoWinExaminerViewer* viewer
-    );
+    static void testFarthestPointSampling(Mesh* mesh, std::vector<int>& fps_samples, SoSeparator* root, SoWinExaminerViewer* viewer);
+
 
     /**
      * Test pairwise harmonics computation with visualization
@@ -59,13 +53,8 @@ public:
      * @param root The scene graph root for visualization
      * @param viewer The 3D viewer for rendering
      */
-    static void testPairwiseHarmonics(
-        Mesh* mesh,
-        PairwiseHarmonics* harmonics,
-        const std::vector<int>& fps_samples,
-        SoSeparator* root,
-        SoWinExaminerViewer* viewer
-    );
+    static void testPairwiseHarmonics(Mesh* mesh, PairwiseHarmonics* harmonics, const std::vector<int>& fps_samples, SoSeparator* root, SoWinExaminerViewer* viewer);
+
 
     /**
      * Test isocurve extraction with visualization
@@ -75,13 +64,8 @@ public:
      * @param root The scene graph root for visualization
      * @param viewer The 3D viewer for rendering
      */
-    static void testIsoCurveExtraction(
-        Mesh* mesh,
-        PairwiseHarmonics* harmonics,
-        const std::vector<int>& fps_samples,
-        SoSeparator* root,
-        SoWinExaminerViewer* viewer
-    );
+    static void testIsoCurveExtraction(Mesh* mesh, PairwiseHarmonics* harmonics, const std::vector<int>& fps_samples, SoSeparator* root, SoWinExaminerViewer* viewer);
+
 
     /**
      * Test rigidity analysis with visualization
@@ -91,13 +75,28 @@ public:
      * @param root The scene graph root for visualization
      * @param viewer The 3D viewer for rendering
      */
-    static void testRigidityAnalysis(
+    static void testRigidityAnalysis(Mesh* mesh, PairwiseHarmonics* harmonics, const std::vector<int>& fps_samples, SoSeparator* root, SoWinExaminerViewer* viewer);
+
+
+    // --- LibIGL Enhanced Features ---
+    static void testHeatGeodesics(Mesh* mesh, PairwiseHarmonics* harmonics, SoSeparator* root, SoWinExaminerViewer* viewer);
+    static void testEnhancedFPS(Mesh* mesh, SoSeparator* root, SoWinExaminerViewer* viewer);
+    static void compareGeodesicMethods(Mesh* mesh, PairwiseHarmonics* harmonics);
+    static void testEnhancedDescriptors(Mesh* mesh, PairwiseHarmonics* harmonics, int k_isocurves);
+    static void testMeshAnalysis(Mesh* mesh, PairwiseHarmonics* harmonics);
+
+    // --- Segmentation Visualization ---
+    static void visualizeMeshSegmentationClusters(const PairwiseHarmonicsSegmentation::SegmentationResult& result, Mesh* mesh, SoSeparator* root, SoWinExaminerViewer* viewer);
+    static void visualizeHarmonicSurfaceSegmentation(const PairwiseHarmonicsSegmentation::SegmentationResult& result, Mesh* mesh, PairwiseHarmonics* harmonics, SoSeparator* root, SoWinExaminerViewer* viewer);
+    static void analyzeDetailedRigidity(const PairwiseHarmonicsSegmentation::SegmentationResult& result);
+    static void visualizeGraphCutSegmentation(
+        const PairwiseHarmonicsSegmentation::SegmentationResult& result,
         Mesh* mesh,
         PairwiseHarmonics* harmonics,
-        const std::vector<int>& fps_samples,
         SoSeparator* root,
-        SoWinExaminerViewer* viewer    );
-
+        SoWinExaminerViewer* viewer,
+        const std::vector<Eigen::Vector3d>* deformed_skeleton_nodes = nullptr
+    );
     /**
      * Create a colored sphere for visualization
      * @param position The 3D position
@@ -105,11 +104,8 @@ public:
      * @param radius Sphere radius
      * @return SoSeparator containing the sphere visualization
      */
-    static SoSeparator* createColoredSphere(
-        const Eigen::Vector3d& position,
-        const Eigen::Vector3f& color,
-        float radius
-    );
+    static SoSeparator* createColoredSphere(const Eigen::Vector3d& position, const Eigen::Vector3f& color, float radius);
+
 
     /**
      * Visualize mesh vertices with color mapping based on scalar field
@@ -118,12 +114,10 @@ public:
      * @param root The scene graph root for visualization
      * @param title Title for the visualization
      */
-    static void visualizeScalarField(
-        const Mesh* mesh,
-        const Eigen::VectorXd& field,
-        SoSeparator* root,
-        const std::string& title
-    );
+    static void visualizeScalarField(const Mesh* mesh, const Eigen::VectorXd& field, SoSeparator* root, const std::string& title);
+
+
+    static void visualizeSkeletalSegments(const std::vector<std::vector<Eigen::Vector3d>>& segments, const Eigen::Vector3f& color, SoSeparator* root);
 
 private:
 };

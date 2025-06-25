@@ -46,6 +46,7 @@ public:    struct SegmentationParams {
         std::vector<SkeletalSegment> partialSkeleton;
         std::vector<MeshComponent> meshComponents;
         std::vector<Eigen::Vector3d> skeletonNodes;  // Complete skeleton nodes
+        std::vector<std::pair<int, int>> skeletonAdjacency; // Pairs of connected skeleton nodes
         std::vector<int> fpsPoints;                  // FPS sample points used
         bool success;
         std::string errorMessage;
@@ -69,6 +70,8 @@ private:
     std::vector<MeshComponent> createInitialSegmentation(const std::vector<SkeletalSegment>& skeleton);
     void completeSkeleton(std::vector<MeshComponent>& components, std::vector<Eigen::Vector3d>& skeletonNodes);
     void refineSegmentation(std::vector<MeshComponent>& components, const std::vector<Eigen::Vector3d>& skeleton);    // Helper methods
+    void buildFinalSkeletonFromSegments(SegmentationResult& result);
+
     double computeNodeRigidity(const std::vector<Eigen::Vector3d>& neighborhood);
     std::vector<Eigen::Vector3d> extractIsocurveCentroids(const Eigen::VectorXd& harmonicField, int sourceIdx, int targetIdx);
     std::vector<SkeletalSegment> extractRigidityBasedSegments(const Eigen::VectorXd& harmonicField, int sourceIdx, int targetIdx);

@@ -61,6 +61,7 @@ set(CORE_SOURCES
     IsocurveAnalysis.cpp
     RigidityAnalysis.cpp
     VisualizationUtils.cpp
+    AnimatedMeshPipeline.cpp
 )
 
 # Create the main executable

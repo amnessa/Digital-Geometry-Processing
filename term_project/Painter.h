@@ -1,3 +1,5 @@
+#pragma once
+
 #include <stdint.h>
 
 #include <Inventor/nodes/SoMaterial.h>
@@ -7,8 +9,8 @@
 #include <Inventor/nodes/SoSeparator.h>
 #include <Inventor/nodes/SoPointSet.h>
 #include <Inventor/nodes/SoShapeHints.h>
-#include<Inventor/nodes/SoDrawStyle.h>
-#include<Inventor/nodes/SoSphere.h>
+#include <Inventor/nodes/SoDrawStyle.h>
+#include <Inventor/nodes/SoSphere.h>
 #include <Inventor/nodes/SoTransform.h>
 #include "Mesh.h"
 
@@ -27,7 +29,7 @@ public:
 private:
 	// Helper function to interpolate points along a curve
 	SbVec3f interpolateAlongCurve(const vector<SbVec3f>& curve, float t);
-	
+
 	// Helper function to get geodesic path between two vertices
 	vector<int> computeGeodesicPath(int source, int target, Mesh* mesh);
 };

@@ -185,6 +185,7 @@ public:
 	 * @return Array of distances from source to all vertices (caller must free)
 	 */
 	float* computeGeodesicDistances(int source, int& N);
+    int findClosestVertex(const Eigen::Vector3d& point) const;
 
 	/**
 	 * Compute and save the full geodesic distance matrix

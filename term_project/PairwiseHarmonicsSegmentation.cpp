@@ -86,12 +86,10 @@ PairwiseHarmonicsSegmentation::SegmentationResult PairwiseHarmonicsSegmentation:
         cout << "Created " << result.meshComponents.size() << " mesh components" << endl;
 
         // =============================================================================
-        // STAGE 5: Skeleton Completion and Refinement
+        // STAGE 5: Skeleton Completion and Refinement (REVISED)
         // =============================================================================
         cout << "\n--- STAGE 5: SKELETON COMPLETION ---" << endl;
-        completeSkeleton(result.meshComponents, result.skeletonNodes);
-        refineSegmentation(result.meshComponents, result.skeletonNodes);
-        cout << "Completed skeleton with " << result.skeletonNodes.size() << " nodes" << endl;
+        buildFinalSkeletonFromSegments(result);
 
         result.success = true;
         cout << "\n=== SEGMENTATION COMPLETE ===" << endl;
@@ -1134,6 +1132,59 @@ PairwiseHarmonicsSegmentation::createImprovedSegmentation(const vector<SkeletalS
 
     cout << "Improved segmentation complete: " << components.size() << " total components" << endl;
     return components;
+}
+
+/**
+ * Builds the final, unified skeleton graph from the computed partial segments.
+ * This merges nodes and preserves connectivity.
+ */
+void PairwiseHarmonicsSegmentation::buildFinalSkeletonFromSegments(SegmentationResult& result) {
+    cout << "Building final skeleton from partial segments..." << endl;
+    result.skeletonNodes.clear();
+    result.skeletonAdjacency.clear();
+
+    // A helper to find an existing node or add a new one, returning its index.
+    // This merges nodes that are very close to each other.
+    auto find_or_add_node = [&](const Eigen::Vector3d& node) {
+        // Search for a close-enough existing node to merge
+        for (size_t i = 0; i < result.skeletonNodes.size(); ++i) {
+            if ((result.skeletonNodes[i] - node).squaredNorm() < 1e-4) { // Merge tolerance
+                return (int)i;
+            }
+        }
+        // Not found, add as a new node
+        result.skeletonNodes.push_back(node);
+        return (int)result.skeletonNodes.size() - 1;
+    };
+
+    // Iterate through each segment to build the final graph
+    for (const auto& segment : result.partialSkeleton) {
+        if (segment.nodes.size() < 2) continue;
+
+        for (size_t i = 0; i < segment.nodes.size() - 1; ++i) {
+            const Eigen::Vector3d& p1 = segment.nodes[i];
+            const Eigen::Vector3d& p2 = segment.nodes[i+1];
+
+            int idx1 = find_or_add_node(p1);
+            int idx2 = find_or_add_node(p2);
+
+            if (idx1 != idx2) {
+                // Avoid adding duplicate edges
+                bool exists = false;
+                for(const auto& edge : result.skeletonAdjacency) {
+                    if ((edge.first == idx1 && edge.second == idx2) || (edge.first == idx2 && edge.second == idx1)) {
+                        exists = true;
+                        break;
+                    }
+                }
+                if (!exists) {
+                    result.skeletonAdjacency.push_back({idx1, idx2});
+                }
+            }
+        }
+    }
+    cout << "Final skeleton built with " << result.skeletonNodes.size() << " nodes and "
+         << result.skeletonAdjacency.size() << " edges." << endl;
 }
 
 void PairwiseHarmonicsSegmentation::completeSkeleton(

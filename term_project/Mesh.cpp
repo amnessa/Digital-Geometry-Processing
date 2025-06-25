@@ -472,6 +472,21 @@ vector<int> Mesh::farthestPointSampling(int numSamples, int seedVertex) {
     return samples;
 }
 
+int Mesh::findClosestVertex(const Eigen::Vector3d& point) const {
+    int closest_idx = -1;
+    double min_dist_sq = std::numeric_limits<double>::max();
+
+    for (size_t i = 0; i < verts.size(); ++i) {
+        Eigen::Vector3d vert_pos(verts[i]->coords[0], verts[i]->coords[1], verts[i]->coords[2]);
+        double dist_sq = (vert_pos - point).squaredNorm();
+        if (dist_sq < min_dist_sq) {
+            min_dist_sq = dist_sq;
+            closest_idx = i;
+        }
+    }
+    return closest_idx;
+}
+
 /**
  * Find intersections between two geodesic paths
  * @param path1 First path as vector of vertex indices
