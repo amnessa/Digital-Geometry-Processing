@@ -880,9 +880,6 @@ void VisualizationUtils::visualizeGraphCutSegmentation(const PairwiseHarmonicsSe
 
     cout << "Using " << rigidSegments.size() << " segments for graph-cut optimization." << endl;
 
-    // The rest of the function (data cost, smoothness cost, ICM optimization) remains unchanged.
-    // It will now operate on the segments defined above (either static or dynamic).
-
     // Step 2: Build face adjacency graph
     cout << "Step 2: Building face adjacency graph..." << endl;
 
@@ -939,6 +936,27 @@ void VisualizationUtils::visualizeGraphCutSegmentation(const PairwiseHarmonicsSe
     }
 
     cout << "Cached " << cachedHarmonicFields.size() << " harmonic fields." << endl;
+
+    // --- NEW: Collect all unique FPS indices used by limb segments ---
+    // These points define the "tips" of the limbs and will be used to
+    // create an exclusion zone for the torso segment, as per your analysis.
+    vector<Eigen::Vector3d> limb_fps_positions;
+    {
+        vector<int> limb_fps_indices;
+        for (const auto& seg : rigidSegments) {
+            if (seg.sourceIdx >= 0) limb_fps_indices.push_back(seg.sourceIdx);
+            if (seg.targetIdx >= 0) limb_fps_indices.push_back(seg.targetIdx);
+        }
+        sort(limb_fps_indices.begin(), limb_fps_indices.end());
+        limb_fps_indices.erase(unique(limb_fps_indices.begin(), limb_fps_indices.end()), limb_fps_indices.end());
+
+        for (int idx : limb_fps_indices) {
+            if (idx >= 0 && idx < mesh->verts.size()) {
+                limb_fps_positions.push_back(Eigen::Vector3d(mesh->verts[idx]->coords[0], mesh->verts[idx]->coords[1], mesh->verts[idx]->coords[2]));
+            }
+        }
+    }
+
     // Step 4: Define energy function and solve optimization
     cout << "Step 4: Computing data costs and smoothness costs..." << endl;
 
@@ -1003,26 +1021,45 @@ void VisualizationUtils::visualizeGraphCutSegmentation(const PairwiseHarmonicsSe
                 if (harmonicIt != cachedHarmonicFields.end()) {
                     const Eigen::VectorXd& harmonicField = harmonicIt->second;
 
-                    // --- OPTIMIZATION ---
-                    // Instead of using a single closest vertex, average the harmonic values of the face's three vertices.
+                    // Average the harmonic values of the face's three vertices.
                     double harmonicValue = (harmonicField(face->v1i) + harmonicField(face->v2i) + harmonicField(face->v3i)) / 3.0;
 
+                    // The cached harmonic field is always computed from min_index to max_index.
+                    // If this segment's direction is flipped, we must flip the harmonic value back.
                     if (src > tgt) {
                         harmonicValue = 1.0 - harmonicValue;
                     }
 
                     double rangeCenter = (rigidSeg.startHarmonicValue + rigidSeg.endHarmonicValue) / 2.0;
-                    harmonic_cost = abs(harmonicValue - rangeCenter);
+                    harmonic_cost = 4.0 * harmonicValue * (1.0 - harmonicValue);
                 }
 
                 // Combine costs. Lambda weights the importance of geometric proximity.
-                const double lambda = 1.0; // A lambda of 1.0 gives them equal initial weighting.
+                const double lambda = 1.5;
                 dataCost[f][label] = harmonic_cost + lambda * euclidean_cost;
 
             } else {
-                // --- COST (Torso Segments) ---
-                // Torso cost remains purely geometric.
-                dataCost[f][label] = euclidean_cost;
+                // --- REVISED COST (Torso Segments) ---
+                // The cost for a face to join the torso is now primarily defined by its
+                // distance from the tips of the limbs (the FPS points). A face close to a
+                // limb tip should have a HIGH cost to join the torso, creating an "exclusion zone".
+                double min_dist_to_limb_tip = std::numeric_limits<double>::max();
+                if (!limb_fps_positions.empty()) {
+                    for (const auto& fps_pos : limb_fps_positions) {
+                        double dist = (faceCentroid - fps_pos).norm();
+                        min_dist_to_limb_tip = std::min(min_dist_to_limb_tip, dist);
+                    }
+                }
+
+                // Normalize the distance by the bounding box diagonal for scale invariance.
+                double normalized_dist = (bbox_diag > 1e-6) ? (min_dist_to_limb_tip / bbox_diag) : min_dist_to_limb_tip;
+
+                // The cost should be high when the distance is low (i.e., close to a limb tip).
+                // We use an exponential function: cost = exp(-alpha * dist).
+                // When dist is small, cost is high (~1). When dist is large, cost is low (~0).
+                // A low cost encourages assignment to the torso.
+                const double alpha = 1.7; // Controls how quickly the cost drops. Higher alpha = more localized limbs.
+                dataCost[f][label] = exp(-alpha * normalized_dist);
             }
         }
     }
