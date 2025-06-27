@@ -1031,7 +1031,7 @@ void VisualizationUtils::visualizeGraphCutSegmentation(const PairwiseHarmonicsSe
                     }
 
                     double rangeCenter = (rigidSeg.startHarmonicValue + rigidSeg.endHarmonicValue) / 2.0;
-                    harmonic_cost = 4.0 * harmonicValue * (1.0 - harmonicValue);
+                    harmonic_cost = 3.5 * harmonicValue * (1.0 - harmonicValue);
                 }
 
                 // Combine costs. Lambda weights the importance of geometric proximity.
