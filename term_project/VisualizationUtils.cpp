@@ -1058,7 +1058,7 @@ void VisualizationUtils::visualizeGraphCutSegmentation(const PairwiseHarmonicsSe
                 // We use an exponential function: cost = exp(-alpha * dist).
                 // When dist is small, cost is high (~1). When dist is large, cost is low (~0).
                 // A low cost encourages assignment to the torso.
-                const double alpha = 1.7; // Controls how quickly the cost drops. Higher alpha = more localized limbs.
+                const double alpha = 1.6; // Controls how quickly the cost drops. Higher alpha = more localized limbs.
                 dataCost[f][label] = exp(-alpha * normalized_dist);
             }
         }
